@@ -1,0 +1,16 @@
+%% -*- tab-width: 4;erlang-indent-level: 4;indent-tabs-mode: nil -*-
+%% ex: ts=4 sw=4 et
+{application, riak_api,
+ [
+  {description, "Riak Client APIs"},
+  {vsn, "1.0.0"},
+  {applications, [
+                  kernel,
+                  stdlib,
+                  sasl
+                 ]},
+  {registered, []},
+  {mod, {riak_api_app, []}},
+  {env, [
+        ]}
+]}.
