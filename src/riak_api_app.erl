@@ -28,8 +28,15 @@
          stop/1]).
 
 %% @doc The application:start callback.
--spec start(Type::application:start_type(), StartArgs::term())
-           -> {ok, Pid::pid()} | ignore | {error, Error::term()}.
+-spec start(Type, StartArgs)
+           -> {ok, Pid} | {ok, Pid, State} | {error, Reason} when
+      Type :: normal
+             | {takeover, Node :: node()}
+             | {failover, Node :: node()},
+      Pid :: pid(),
+      State :: term(),
+      StartArgs :: term(),
+      Reason :: term().
 start(_Type, _StartArgs) ->
     riak_core_util:start_app_deps(riak_api),
 

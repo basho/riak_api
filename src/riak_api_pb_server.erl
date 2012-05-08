@@ -54,7 +54,7 @@ start_link() ->
     gen_server:start_link(?MODULE, [], []).
 
 %% @doc Sets the socket to service for this server.
--spec set_socket(pid(), gen_tcp:socket()) -> ok.
+-spec set_socket(pid(), port()) -> ok.
 set_socket(Pid, Socket) ->
     gen_server:call(Pid, {set_socket, Socket}, infinity).
 
@@ -73,7 +73,7 @@ init([]) ->
                 states=ServiceStates}}.
 
 %% @doc The handle_call/3 gen_server callback.
--spec handle_call(Message::term(), From::pid(), State::#state{}) -> {reply, Message::term(), NewState::#state{}}.
+-spec handle_call(Message::term(), From::{pid(),term()}, State::#state{}) -> {reply, Message::term(), NewState::#state{}}.
 handle_call({set_socket, Socket}, _From, State) ->
     inet:setopts(Socket, [{active, once}, {packet, 4}, {header, 1}]),
     {reply, ok, State#state{socket = Socket}}.
