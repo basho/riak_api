@@ -32,6 +32,11 @@
 
 -module(riak_api_pb_service).
 
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-compile([export_all, {no_auto_import, [register/2]}]).
+-endif.
+
 %% Behaviour API
 -export([behaviour_info/1]).
 
@@ -66,7 +71,9 @@ register(Module, Code) ->
 %% codes.  Service modules should be registered before the riak_api
 %% application starts.
 -spec register(Module::module(), MinCode::pos_integer(), MaxCode::pos_integer()) -> ok | {error, Err::term()}.
-register(_Module, MinCode, MaxCode) when MinCode > MaxCode ->
+register(_Module, MinCode, MaxCode) when MinCode > MaxCode orelse
+                                         MinCode < 1 orelse 
+                                         MaxCode < 1 ->
     {error, invalid_message_code_range};
 register(Module, MinCode, MaxCode) ->
     Registrations = dispatch_table(),
@@ -95,3 +102,50 @@ dispatch_table() ->
 -spec services() -> [ module() ].
 services() ->
     lists:usort([ V || {_K,V} <- dict:to_list(dispatch_table()) ]).
+
+-ifdef(TEST).
+
+setup() ->
+    OldServices = app_helper:get_env(riak_api, services, dict:new()),
+    application:set_env(riak_api, services, dict:new()),
+    OldServices.
+
+cleanup(Services) ->
+    application:set_env(riak_api, services, Services).
+
+register_test_() ->
+    {foreach,
+     fun setup/0,
+     fun cleanup/1,
+     [
+      %% Valid registration range
+      ?_assertEqual(foo, begin
+                             ok = register(foo,1,2),
+                             dict:fetch(1, dispatch_table())
+                         end),
+      %% Registration ranges that are invalid
+      ?_assertEqual({error, invalid_message_code_range}, 
+                    register(foo, 2, 1)),
+      ?_assertEqual({error, invalid_message_code_range}, 
+                    register(foo, 2, 1)),
+      ?_assertEqual({error, {already_registered, [1, 2]}},
+                    begin
+                        ok = register(foo, 1, 2),
+                        register(bar, 1, 3)
+                    end)
+      ]}.
+
+services_test_() ->
+    {setup,
+     fun setup/0,
+     fun cleanup/1,
+     [
+      ?_assertEqual([], services()),
+      ?_assertEqual([bar, foo], begin
+                                   register(foo, 1, 2),
+                                   register(bar, 3, 4),
+                                   services()
+                               end)
+      ]}.
+
+-endif.
