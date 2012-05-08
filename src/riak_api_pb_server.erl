@@ -88,9 +88,8 @@ handle_cast(_Msg, State) ->
 handle_info({Ref, done}, #state{req={_Service,Ref}}=State) ->
     %% Streaming requests set the req reference.
     {noreply, State#state{req=undefined}};
-handle_info({Ref, {MessageCode, Message}}, #state{req={Service,Ref}}=State) ->
-    {ok, Encoded} = Service:encode(MessageCode, Message),
-    send_message(Encoded, State),
+handle_info({Ref, Message}, #state{req={Service,Ref}}=State) ->
+    send_encoded_message_or_error(Service, Message, State),
     {noreply, State};
 handle_info({tcp_closed, Socket}, State=#state{socket=Socket}) ->
     {stop, normal, State};
@@ -166,8 +165,7 @@ process_message(Service, Message, ServiceState, #state{states=ServiceStates}=Ser
             ServerState#state{states=NewServiceStates, req={Service,Ref}};
         %% Normal reply
         {reply, ReplyMessage, NewServiceState} ->
-            {ok, Encoded} = Service:encode(ReplyMessage),
-            send_message(Encoded, ServerState),
+            send_encoded_message_or_error(Service, ReplyMessage, ServerState),
             NewServiceStates = dict:store(Service, NewServiceState, ServiceStates),
             ServerState#state{states=NewServiceStates};
         {error, Message, NewServiceState} ->
@@ -179,6 +177,18 @@ process_message(Service, Message, ServiceState, #state{states=ServiceStates}=Ser
             ServerState
     end.
 
+
+%% @doc Given an unencoded response message, attempts to encode it and send it
+%% to the client.
+-spec send_encoded_message_or_error(module(), term(), #state{}) -> any().
+send_encoded_message_or_error(Service, ReplyMessage, ServerState) ->
+    case Service:encode(ReplyMessage) of
+        {ok, Encoded} ->
+            send_message(Encoded, ServerState);
+        Error ->
+            lager:error("PB service ~p could not encode message ~p: ~p", [Service, ReplyMessage, Error]),
+            send_error("Internal service error: no encoding for response message", ServerState)
+    end.
 
 %% @doc Sends a regular message to the client
 -spec send_message(binary(), #state{}) -> ok | {error, term()}.
