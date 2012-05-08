@@ -67,8 +67,6 @@ handle_info(_Info, State) -> {noreply, State}.
       Reason :: normal | shutdown | {shutdown,term()} | term(),
       State :: #state{}.
 terminate(_Reason, _State) ->
-    %% TODO: Update with Russell's new stats system
-    %% riak_kv_stat:update(pbc_disconnect),
     ok.
 
 %% @doc The gen_server code_change/3 callback, called when performing
