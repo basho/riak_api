@@ -86,8 +86,8 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 %% when a new socket is accepted.
 -spec new_connection(gen_tcp:socket(), #state{}) -> {ok, #state{}}.
 new_connection(Socket, State) ->
-    {ok, Pid} = riak_api_pb_socket_sup:start_socket(),
+    {ok, Pid} = riak_api_pb_sup:start_socket(),
     ok = gen_tcp:controlling_process(Socket, Pid),
-    ok = riak_api_pb_socket:set_socket(Pid, Socket),
+    ok = riak_api_pb_server:set_socket(Pid, Socket),
     {ok, State}.
 

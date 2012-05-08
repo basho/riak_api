@@ -160,19 +160,19 @@ code_change(_OldVsn,State,_Extra) ->
 -spec process_message(atom(), term(), term(), #state{}) -> #state{}.
 process_message(Service, Message, ServiceState, #state{states=ServiceStates}=ServerState) ->
     case Service:process(Message, ServiceState) of
-        %% Normal reply
-        {reply, {ReplyCode, ReplyMessage}, NewServiceState} when is_integer(ReplyCode) ->
-            {ok, Encoded} = Service:encode(ReplyCode, ReplyMessage),
-            send_message(Encoded, ServerState),
-            NewServiceStates = dict:update(Service, NewServiceState, ServiceStates),
-            ServerState#state{states=NewServiceStates};
         %% Streaming reply with reference
         {reply, {stream, Ref}, NewServiceState} ->
-            NewServiceStates = dict:update(Service, NewServiceState, ServiceStates),
+            NewServiceStates = dict:store(Service, NewServiceState, ServiceStates),
             ServerState#state{states=NewServiceStates, req={Service,Ref}};
+        %% Normal reply
+        {reply, ReplyMessage, NewServiceState} ->
+            {ok, Encoded} = Service:encode(ReplyMessage),
+            send_message(Encoded, ServerState),
+            NewServiceStates = dict:store(Service, NewServiceState, ServiceStates),
+            ServerState#state{states=NewServiceStates};
         {error, Message, NewServiceState} ->
             send_error(Message, ServerState),
-            NewServiceStates = dict:update(Service, NewServiceState, ServiceStates),
+            NewServiceStates = dict:store(Service, NewServiceState, ServiceStates),
             ServerState#state{states=NewServiceStates};
         Other ->
             send_error("Unknown service response: ~p", [Other], ServerState),
