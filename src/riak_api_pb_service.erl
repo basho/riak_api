@@ -72,7 +72,7 @@ register(Module, Code) ->
 %% application starts.
 -spec register(Module::module(), MinCode::pos_integer(), MaxCode::pos_integer()) -> ok | {error, Err::term()}.
 register(_Module, MinCode, MaxCode) when MinCode > MaxCode orelse
-                                         MinCode < 1 orelse 
+                                         MinCode < 1 orelse
                                          MaxCode < 1 ->
     {error, invalid_message_code_range};
 register(Module, MinCode, MaxCode) ->
@@ -124,9 +124,9 @@ register_test_() ->
                              dict:fetch(1, dispatch_table())
                          end),
       %% Registration ranges that are invalid
-      ?_assertEqual({error, invalid_message_code_range}, 
+      ?_assertEqual({error, invalid_message_code_range},
                     register(foo, 2, 1)),
-      ?_assertEqual({error, invalid_message_code_range}, 
+      ?_assertEqual({error, invalid_message_code_range},
                     register(foo, 2, 1)),
       ?_assertEqual({error, {already_registered, [1, 2]}},
                     begin
