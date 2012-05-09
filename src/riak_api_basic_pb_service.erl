@@ -47,7 +47,8 @@
 -export([init/0,
          decode/2,
          encode/1,
-         process/2]).
+         process/2,
+         process_stream/3]).
 
 %% @doc init/0 callback. Returns the service internal start
 %% state. This service has no state.
@@ -74,3 +75,9 @@ process(rpbgetserverinforeq, State) ->
     Message = #rpbgetserverinforesp{node = riakc_pb:to_binary(node()),
                                     server_version = riakc_pb:to_binary(Vsn)},
     {reply, Message, State}.
+
+%% @doc process_stream/3 callback. Handles a streaming message
+%% received by the server on behalf of the service. This service
+%% implements no streaming responses, so all messages are ignored.
+process_stream(_,_,State) ->
+    {ignore, State}.

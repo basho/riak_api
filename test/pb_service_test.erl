@@ -9,31 +9,32 @@
 -export([init/0,
          decode/2,
          encode/1,
-         process/2]).
+         process/2,
+         process_stream/3]).
 
--define(MSGMIN, 1).
--define(MSGMAX, 9).
+-define(MSGMIN, 101).
+-define(MSGMAX, 109).
 
 init() ->
     undefined.
 
-decode(1, <<>>) ->
+decode(101, <<>>) ->
     {ok, dummyreq};
-decode(3, <<>>) ->
+decode(103, <<>>) ->
     {ok, badresponse};
-decode(6, <<>>) ->
+decode(106, <<>>) ->
     {ok, internalerror};
-decode(7, <<>>) ->
+decode(107, <<>>) ->
     {ok, stream};
 decode(_,_) ->
     {error, unknown_message}.
 
 encode(foo) ->
-    {ok, <<8,$f,$o,$o>>};
+    {ok, <<108,$f,$o,$o>>};
 encode(bar) ->
-    {ok, <<9,$b,$a,$r>>};
+    {ok, <<109,$b,$a,$r>>};
 encode(ok) ->
-    {ok, <<2,$o,$k>>};
+    {ok, <<102,$o,$k>>};
 encode(_) ->
     error.
 
@@ -52,6 +53,14 @@ process(badresponse, State) ->
     {reply, badresponse, State};
 process(dummyreq, State) ->
     {reply, ok, State}.
+
+process_stream({Ref,done}, Ref, State) ->
+    {done, State};
+process_stream({Ref,Msg}, Ref, State) ->
+    {reply, Msg, State};
+process_stream(_, _, State) ->
+    {ignore, State}.
+
 
 %% ===================================================================
 %% Eunit tests
@@ -116,16 +125,16 @@ simple_test_() ->
      fun cleanup/1,
      [
       %% Happy path, sync operation
-      ?_assertEqual([2|<<"ok">>], request(1, <<>>)),
+      ?_assertEqual([102|<<"ok">>], request(101, <<>>)),
       %% Happy path, streaming operation
-      ?_assertEqual([{8, <<"foo">>},{9,<<"bar">>}],
-                    request_stream(7, <<>>, fun([Code|_]) -> Code == 9 end)),
+      ?_assertEqual([{108, <<"foo">>},{109,<<"bar">>}],
+                    request_stream(107, <<>>, fun([Code|_]) -> Code == 109 end)),
       %% Unknown request message code
-      ?_assertMatch([0|Bin] when is_binary(Bin), request(5, <<>>)),
+      ?_assertMatch([0|Bin] when is_binary(Bin), request(105, <<>>)),
       %% Undecodable request message code
-      ?_assertMatch([0|Bin] when is_binary(Bin), request(2, <<>>)),
+      ?_assertMatch([0|Bin] when is_binary(Bin), request(102, <<>>)),
       %% Unencodable response message
-      ?_assertMatch([0|Bin] when is_binary(Bin), request(3, <<>>)),
+      ?_assertMatch([0|Bin] when is_binary(Bin), request(103, <<>>)),
       %% Internal service error
-      ?_assertMatch([0|Bin] when is_binary(Bin), request(6, <<>>))
+      ?_assertMatch([0|Bin] when is_binary(Bin), request(106, <<>>))
      ]}.

@@ -85,12 +85,6 @@ handle_cast(_Msg, State) ->
 
 %% @doc The handle_info/2 gen_server callback.
 -spec handle_info(Message::term(), State::#state{}) -> {noreply, NewState::#state{}} | {stop, Reason::atom(), NewState::#state{}}.
-handle_info({Ref, done}, #state{req={_Service,Ref}}=State) ->
-    %% Streaming requests set the req reference.
-    {noreply, State#state{req=undefined}};
-handle_info({Ref, Message}, #state{req={Service,Ref}}=State) ->
-    send_encoded_message_or_error(Service, Message, State),
-    {noreply, State};
 handle_info({tcp_closed, Socket}, State=#state{socket=Socket}) ->
     {stop, normal, State};
 handle_info({tcp_error, Socket, _Reason}, State=#state{socket=Socket}) ->
@@ -100,32 +94,62 @@ handle_info({tcp, _Sock, [MsgCode|MsgData]}, State=#state{
                                                req=undefined,
                                                dispatch=Dispatch,
                                                states=ServiceStates}) ->
-    %% First find the appropriate service module to dispatch
-    case dict:find(MsgCode, Dispatch) of
-        {ok, Service} ->
-            %% Decode the message according to the service
-            case Service:decode(MsgCode, MsgData) of
-                {ok, Message} ->
-                    %% Process the message
-                    ServiceState = dict:fetch(Service, ServiceStates),
-                    NewState = process_message(Service, Message, ServiceState, State);
-                {error, Reason} ->
-                    send_error("Message decoding error: ~p", [Reason], State),
-                    NewState = State
-            end;
-        error ->
-            send_error("Unknown message code.", State),
-            NewState = State
-    end,
-    inet:setopts(Socket, [{active, once}]),
-    {noreply, NewState};
+    try
+        %% First find the appropriate service module to dispatch
+        case dict:find(MsgCode, Dispatch) of
+            {ok, Service} ->
+                %% Decode the message according to the service
+                case Service:decode(MsgCode, MsgData) of
+                    {ok, Message} ->
+                        %% Process the message
+                        ServiceState = dict:fetch(Service, ServiceStates),
+                        NewState = process_message(Service, Message, ServiceState, State);
+                    {error, Reason} ->
+                        send_error("Message decoding error: ~p", [Reason], State),
+                        NewState = State
+                end;
+            error ->
+                send_error("Unknown message code.", State),
+                NewState = State
+        end,
+        inet:setopts(Socket, [{active, once}]),
+        {noreply, NewState}
+    catch
+        %% Tell the client we errored before closing the connection.
+        Type:Failure ->
+            lager:error("Message processing error: ~p", [Failure]),
+            send_error("Error processing incoming message: ~p:~p", [Type, Failure], State),
+            {stop, {Type, Failure}, State}
+    end;
 handle_info({tcp, _Sock, _Data}, State) ->
     %% req =/= undefined: received a new request while another was in
     %% progress -> Error
     lager:error("Received a new PB socket request"
                 " while another was in progress"),
     send_error("Cannot send another request while one is in progress", State),
-    {stop, normal, State}.
+    {stop, normal, State};
+handle_info(StreamMessage, #state{req={Service,ReqId},
+                                  states=ServiceStates}=State) ->
+    %% Handle streaming messages from other processes. This should
+    %% help avoid creating extra middlemen. Naturally, this is only
+    %% valid when a streaming request has started, other messages will
+    %% be ignored.
+    try
+        ServiceState = dict:fetch(Service, ServiceStates),
+        NewState = process_stream(Service, ReqId, StreamMessage, ServiceState, State),
+        {noreply, NewState}
+    catch
+        %% Tell the client we errored before closing the connection.
+        Type:Reason ->
+            lager:error("Streaming message processing error (State: ~p): ~p", [State, Reason]),
+            send_error("Error processing stream message: ~p:~p", [Type, Reason], State),
+            {stop, {Type, Reason}, State}
+    end;
+handle_info(Message, State) ->
+    %% Throw out messages we don't care about, but log them at the
+    %% debug level.
+    lager:debug("Unrecognized message ~p", [Message]),
+    {noreply, State}.
 
 
 %% @doc The gen_server terminate/2 callback, called when shutting down
@@ -157,26 +181,61 @@ code_change(_OldVsn,State,_Extra) ->
 %% recognizes it. This is called after the message has been identified
 %% and decoded.
 -spec process_message(atom(), term(), term(), #state{}) -> #state{}.
-process_message(Service, Message, ServiceState, #state{states=ServiceStates}=ServerState) ->
+process_message(Service, Message, ServiceState, ServerState) ->
     case Service:process(Message, ServiceState) of
         %% Streaming reply with reference
-        {reply, {stream, Ref}, NewServiceState} ->
-            NewServiceStates = dict:store(Service, NewServiceState, ServiceStates),
-            ServerState#state{states=NewServiceStates, req={Service,Ref}};
+        {reply, {stream, ReqId}, NewServiceState} ->
+            update_service_state(Service, NewServiceState, ServerState#state{req={Service,ReqId}});
         %% Normal reply
         {reply, ReplyMessage, NewServiceState} ->
             send_encoded_message_or_error(Service, ReplyMessage, ServerState),
-            NewServiceStates = dict:store(Service, NewServiceState, ServiceStates),
-            ServerState#state{states=NewServiceStates};
+            update_service_state(Service, NewServiceState, ServerState);
+        %% Recoverable error
         {error, Message, NewServiceState} ->
             send_error(Message, ServerState),
-            NewServiceStates = dict:store(Service, NewServiceState, ServiceStates),
-            ServerState#state{states=NewServiceStates};
+            update_service_state(Service, NewServiceState, ServerState);
+        %% Result is broken
         Other ->
-            send_error("Unknown service response: ~p", [Other], ServerState),
+            send_error("Unknown PB service response: ~p", [Other], ServerState),
             ServerState
     end.
 
+%% @doc Processes a message received from a stream. These are received
+%% on the server process so that we can avoid middlemen, but need to
+%% be translated into responses according to the service producing
+%% them.
+-spec process_stream(module(), term(), term(), term(), #state{}) -> #state{}.
+process_stream(Service, ReqId, Message, ServiceState0, State) ->
+    case Service:process_stream(Message, ReqId, ServiceState0) of
+        %% Give the service the opportunity to throw out messages it
+        %% doesn't care about.
+        {ignore, ServiceState} ->
+            update_service_state(Service, ServiceState, State);
+        %% Regular middle-of-stream messages
+        {reply, Reply, ServiceState} ->
+            send_encoded_message_or_error(Service, Reply, State),
+            update_service_state(Service, ServiceState, State);
+        %% Stop the stream with a final reply
+        {done, Reply, ServiceState} ->
+            send_encoded_message_or_error(Service, Reply, State),
+            update_service_state(Service, ServiceState, State);
+        %% Stop the stream without sending a client reply
+        {done, ServiceState} ->
+            update_service_state(Service, ServiceState, State#state{req=undefined});
+        %% Send the client normal errors
+        {error, Reason, ServiceState} ->
+            send_error(Reason, State),
+            update_service_state(Service, ServiceState, State#state{req=undefined});
+        Other ->
+            send_error("Unknown PB service response: ~p", [Other], State),
+            State
+    end.
+
+%% @doc Updates the given service state and puts it in the server's state.
+-spec update_service_state(module(), term(), #state{}) -> #state{}.
+update_service_state(Service, NewServiceState, #state{states=ServiceStates}=ServerState) ->
+    NewServiceStates = dict:store(Service, NewServiceState, ServiceStates),
+    ServerState#state{states=NewServiceStates}.
 
 %% @doc Given an unencoded response message, attempts to encode it and send it
 %% to the client.

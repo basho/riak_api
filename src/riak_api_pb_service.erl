@@ -54,7 +54,8 @@ behaviour_info(callbacks) ->
     [{init,0},
      {decode,2},
      {encode,1},
-     {process,2}];
+     {process,2},
+     {process_stream,3}];
 behaviour_info(_) ->
     undefined.
 
