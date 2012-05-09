@@ -43,6 +43,9 @@ start(_Type, _StartArgs) ->
     %% TODO: cluster_info registration. What do we expose?
     %% catch cluster_info:register_app(riak_api_cinfo),
 
+    ok = riak_api_pb_service:register(riak_api_basic_pb_service, 1, 2),
+    ok = riak_api_pb_service:register(riak_api_basic_pb_service, 7, 8),
+
     case riak_api_sup:start_link() of
         {ok, Pid} ->
             %% TODO: Is it necessary to register the service? We might
