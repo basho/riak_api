@@ -117,14 +117,14 @@ handle_info({tcp, _Sock, [MsgCode|MsgData]}, State=#state{
     catch
         %% Tell the client we errored before closing the connection.
         Type:Failure ->
-            lager:error("Message processing error: ~p", [Failure]),
+            lager:debug("Message processing error: ~p", [Failure]),
             send_error("Error processing incoming message: ~p:~p", [Type, Failure], State),
             {stop, {Type, Failure}, State}
     end;
 handle_info({tcp, _Sock, _Data}, State) ->
     %% req =/= undefined: received a new request while another was in
     %% progress -> Error
-    lager:error("Received a new PB socket request"
+    lager:debug("Received a new PB socket request"
                 " while another was in progress"),
     send_error("Cannot send another request while one is in progress", State),
     {stop, normal, State};
@@ -141,7 +141,7 @@ handle_info(StreamMessage, #state{req={Service,ReqId},
     catch
         %% Tell the client we errored before closing the connection.
         Type:Reason ->
-            lager:error("Streaming message processing error (State: ~p): ~p", [State, Reason]),
+            lager:debug("Streaming message processing error (State: ~p): ~p", [State, Reason]),
             send_error("Error processing stream message: ~p:~p", [Type, Reason], State),
             {stop, {Type, Reason}, State}
     end;
@@ -245,7 +245,7 @@ send_encoded_message_or_error(Service, ReplyMessage, ServerState) ->
         {ok, Encoded} ->
             send_message(Encoded, ServerState);
         Error ->
-            lager:error("PB service ~p could not encode message ~p: ~p", [Service, ReplyMessage, Error]),
+            lager:debug("PB service ~p could not encode message ~p: ~p", [Service, ReplyMessage, Error]),
             send_error("Internal service error: no encoding for response message", ServerState)
     end.
 
