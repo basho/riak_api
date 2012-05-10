@@ -44,6 +44,9 @@
           states :: dict()    % per-service connection state
          }).
 
+-type format() :: {format, term()} | {format, io:format(), [term()]}.
+-export_type([format/0]).
+
 %% ===================================================================
 %% Public API
 %% ===================================================================
@@ -251,17 +254,21 @@ send_encoded_message_or_error(Service, ReplyMessage, ServerState) ->
 
 %% @doc Sends a regular message to the client
 -spec send_message(binary(), #state{}) -> ok | {error, term()}.
-send_message(Bin, #state{socket=Sock}) ->
+send_message(Bin, #state{socket=Sock}) when is_binary(Bin) ->
     gen_tcp:send(Sock, Bin).
 
 %% @doc Sends an error message to the client
--spec send_error(iolist(), #state{}) -> ok | {error, term()}.
-send_error(Message, State) ->
+-spec send_error(iolist() | format(), #state{}) -> ok | {error, term()}.
+send_error({format, Term}, State) ->
+    send_error({format, "~p", [Term]}, State);
+send_error({format, Fmt, TList}, State) ->
+    send_error(io_lib:format(Fmt, TList), State);
+send_error(Message, State) when is_list(Message) orelse is_binary(Message) ->
     %% TODO: provide a service for encoding error messages? While
     %% extra work, it would follow the pattern. On the other hand,
     %% maybe it's too much abstraction. This is a hack, allowing us
     %% to avoid including the header file.
-    Packet = riakc_pb:encode({rpberrorresp,Message,0}),
+    Packet = riakc_pb:encode({rpberrorresp, iolist_to_binary(Message), 0}),
     send_message(Packet, State).
 
 %% @doc Formats the terms with the given string and then sends an
