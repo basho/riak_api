@@ -221,7 +221,7 @@ process_stream(Service, ReqId, Message, ServiceState0, State) ->
         %% Stop the stream with a final reply
         {done, Reply, ServiceState} ->
             send_encoded_message_or_error(Service, Reply, State),
-            update_service_state(Service, ServiceState, State);
+            update_service_state(Service, ServiceState, State#state{req=undefined});
         %% Stop the stream without sending a client reply
         {done, ServiceState} ->
             update_service_state(Service, ServiceState, State#state{req=undefined});

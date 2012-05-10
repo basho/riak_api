@@ -59,12 +59,12 @@ init() ->
 %% @doc decode/2 callback. Decodes an incoming message.
 %% @todo Factor this out of riakc_pb to remove the dependency.
 decode(Code, Bin) when Code == 1; Code == 7 ->
-    riakc_pb:decode(Code, Bin).
+    {ok, riakc_pb:decode(Code, Bin)}.
 
 %% @doc encode/1 callback. Encodes an outgoing response message.
 %% @todo Factor this out of riakc_pb to remove the dependency.
 encode(Message) ->
-    riakc_pb:encode(Message).
+    {ok, riakc_pb:encode(Message)}.
 
 %% @doc process/2 callback. Handles an incoming request message.
 process(rpbpingreq, State) ->
