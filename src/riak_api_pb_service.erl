@@ -41,7 +41,8 @@
 -export([behaviour_info/1]).
 
 %% Service-provider API
--export([register/2,
+-export([register/1,
+         register/2,
          register/3]).
 
 %% Server API
@@ -58,6 +59,20 @@ behaviour_info(callbacks) ->
      {process_stream,3}];
 behaviour_info(_) ->
     undefined.
+
+%% @doc Registers a number of services at once.
+%% @see register/3
+-type registration() :: {Service::module(), MinCode::pos_integer(), MaxCode::pos_integer()}.
+-spec register([registration()]) -> ok | {error, Reason::term()}.
+register([]) ->
+    ok;
+register([{Module, MinCode, MaxCode}|Rest]) ->
+    case register(Module, MinCode, MaxCode) of
+        ok ->
+            register(Rest);
+        Other ->
+            Other
+    end.
 
 %% @doc Registers a service module for a given message code.
 %% @equiv register(Module, Code, Code)
@@ -133,7 +148,9 @@ register_test_() ->
                     begin
                         ok = register(foo, 1, 2),
                         register(bar, 1, 3)
-                    end)
+                    end),
+      %% Register multiple
+      ?_assertEqual(ok, register([{foo, 1, 2}, {bar, 3, 4}]))
       ]}.
 
 services_test_() ->

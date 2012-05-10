@@ -254,7 +254,7 @@ send_encoded_message_or_error(Service, ReplyMessage, ServerState) ->
 
 %% @doc Sends a regular message to the client
 -spec send_message(binary(), #state{}) -> ok | {error, term()}.
-send_message(Bin, #state{socket=Sock}) when is_binary(Bin) ->
+send_message(Bin, #state{socket=Sock}) when is_binary(Bin) orelse is_list(Bin) ->
     gen_tcp:send(Sock, Bin).
 
 %% @doc Sends an error message to the client
