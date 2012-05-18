@@ -40,7 +40,7 @@
 %% @end
 -module(riak_api_basic_pb_service).
 
--include_lib("riakc/include/riakclient_pb.hrl").
+-include_lib("riak_pb/include/riak_pb.hrl").
 
 -behaviour(riak_api_pb_service).
 
@@ -59,12 +59,12 @@ init() ->
 %% @doc decode/2 callback. Decodes an incoming message.
 %% @todo Factor this out of riakc_pb to remove the dependency.
 decode(Code, Bin) when Code == 1; Code == 7 ->
-    {ok, riakc_pb:decode(Code, Bin)}.
+    {ok, riak_pb_codec:decode(Code, Bin)}.
 
 %% @doc encode/1 callback. Encodes an outgoing response message.
 %% @todo Factor this out of riakc_pb to remove the dependency.
 encode(Message) ->
-    {ok, riakc_pb:encode(Message)}.
+    {ok, riak_pb_codec:encode(Message)}.
 
 %% @doc process/2 callback. Handles an incoming request message.
 process(rpbpingreq, State) ->
@@ -72,8 +72,8 @@ process(rpbpingreq, State) ->
 process(rpbgetserverinforeq, State) ->
     %% TODO: Think of a better way to present the server version
     {ok, Vsn} = application:get_key(riak_kv, vsn),
-    Message = #rpbgetserverinforesp{node = riakc_pb:to_binary(node()),
-                                    server_version = riakc_pb:to_binary(Vsn)},
+    Message = #rpbgetserverinforesp{node = riak_pb_codec:to_binary(node()),
+                                    server_version = riak_pb_codec:to_binary(Vsn)},
     {reply, Message, State}.
 
 %% @doc process_stream/3 callback. Handles a streaming message

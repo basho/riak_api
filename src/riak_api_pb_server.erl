@@ -120,10 +120,11 @@ handle_info({tcp, _Sock, [MsgCode|MsgData]}, State=#state{
     catch
         %% Tell the client we errored before closing the connection.
         Type:Failure ->
-            lager:debug("Message processing error: ~p", [Failure]),
+            lager:debug("Message processing error: ~p:~p ~p", [Type, Failure, erlang:get_stacktrace()]),
             send_error("Error processing incoming message: ~p:~p", [Type, Failure], State),
             {stop, {Type, Failure}, State}
-    end;
+    end
+;
 handle_info({tcp, _Sock, _Data}, State) ->
     %% req =/= undefined: received a new request while another was in
     %% progress -> Error
@@ -144,7 +145,8 @@ handle_info(StreamMessage, #state{req={Service,ReqId},
     catch
         %% Tell the client we errored before closing the connection.
         Type:Reason ->
-            lager:debug("Streaming message processing error (State: ~p): ~p", [State, Reason]),
+            lager:debug("Streaming message processing error (State: ~p): ~p:~p ~p",
+                        [State, Type, Reason, erlang:get_stacktrace()]),
             send_error("Error processing stream message: ~p:~p", [Type, Reason], State),
             {stop, {Type, Reason}, State}
     end;
@@ -268,7 +270,7 @@ send_error(Message, State) when is_list(Message) orelse is_binary(Message) ->
     %% extra work, it would follow the pattern. On the other hand,
     %% maybe it's too much abstraction. This is a hack, allowing us
     %% to avoid including the header file.
-    Packet = riakc_pb:encode({rpberrorresp, iolist_to_binary(Message), 0}),
+    Packet = riak_pb_codec:encode({rpberrorresp, iolist_to_binary(Message), 0}),
     send_message(Packet, State).
 
 %% @doc Formats the terms with the given string and then sends an
