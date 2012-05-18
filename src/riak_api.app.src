@@ -9,7 +9,8 @@
                   stdlib,
                   sasl
                  ]},
-  {registered, []},
+  {registered, [riak_api_sup,
+                riak_api_pb_sup]},
   {mod, {riak_api_app, []}},
   {env, [
         ]}
