@@ -2,7 +2,7 @@
 %%
 %% riak_api_pb_listener: Listen for protocol buffer clients
 %%
-%% Copyright (c) 2007-2010 Basho Technologies, Inc.  All Rights Reserved.
+%% Copyright (c) 2007-2012 Basho Technologies, Inc.  All Rights Reserved.
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -33,8 +33,8 @@
 %% @doc Starts the PB listener
 -spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
-    PortNum = app_helper:get_env(riak_api, pb_port),
-    IpAddr = app_helper:get_env(riak_api, pb_ip),
+    PortNum = get_port(),
+    IpAddr = get_ip(),
     gen_nb_server:start_link(?MODULE, IpAddr, PortNum, [PortNum]).
 
 %% @doc Initialization callback for gen_nb_server.
@@ -89,3 +89,34 @@ new_connection(Socket, State) ->
     ok = riak_api_pb_server:set_socket(Pid, Socket),
     {ok, State}.
 
+%% @private
+get_port() ->
+    Envs = [{riak_api, pb_port},
+            {riak_kv, pb_port}],
+    case app_helper:try_envs(Envs) of
+        {riak_api, pb_port, Port} ->
+            Port;
+        {riak_kv, pb_port, Port} ->
+            lager:warning("The config riak_kv/pb_port has been"
+                          " deprecated and will be removed.  Use"
+                          " riak_api/pb_port in the future."),
+            Port;
+        {default, undefined} ->
+            throw({error, "pb_port config not defined"})
+    end.
+
+%% @private
+get_ip() ->
+    Envs = [{riak_api, pb_ip},
+            {riak_kv, pb_ip}],
+    case app_helper:try_envs(Envs) of
+        {riak_api, pb_ip, IP} ->
+            IP;
+        {riak_kv, pb_ip, IP} ->
+            lager:warning("The config riak_kv/pb_ip has been"
+                          " deprecated and will be removed.  Use"
+                          " riak_api/pb_ip in the future."),
+            IP;
+        {default, undefined} ->
+            throw({error, "pb_ip config not defined"})
+    end.
