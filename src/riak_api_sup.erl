@@ -30,7 +30,7 @@
          init/1]).
 
 -define(CHILD(I, Type), {I, {I, start_link, []}, permanent, 5000, Type, [I]}).
-
+-define(CHILD(I, Type, Args), {I, {I, start_link, Args}, permanent, 5000, Type, [I]}).
 
 %% @doc Starts the supervisor.
 -spec start_link() -> {ok, pid()} | {error, term()}.
@@ -44,11 +44,12 @@ start_link() ->
       MaxT :: pos_integer(),
       ChildSpec :: supervisor:child_spec().
 init([]) ->
-    IsPbConfigured = (riak_api_pb_listener:get_port() /= undefined)
-                      andalso (riak_api_pb_listener:get_ip() /= undefined),
+    Port = riak_api_pb_listener:get_port(),
+    IP = riak_api_pb_listener:get_ip(),
+    IsPbConfigured = (Port /= undefined) andalso (IP /= undefined),
     Processes = if IsPbConfigured ->
                         [?CHILD(riak_api_pb_sup, supervisor),
-                         ?CHILD(riak_api_pb_listener, worker)];
+                         ?CHILD(riak_api_pb_listener, worker, [IP, Port])];
                    true ->
                         []
                 end,

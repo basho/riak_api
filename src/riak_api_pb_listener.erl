@@ -24,7 +24,7 @@
 
 -module(riak_api_pb_listener).
 -behaviour(gen_nb_server).
--export([start_link/0]).
+-export([start_link/2]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 -export([sock_opts/0, new_connection/2]).
@@ -32,10 +32,8 @@
 -record(state, {portnum}).
 
 %% @doc Starts the PB listener
--spec start_link() -> {ok, pid()} | {error, term()}.
-start_link() ->
-    PortNum = get_port(),
-    IpAddr = get_ip(),
+-spec start_link(inet:ip_address() | string(),  non_neg_integer()) -> {ok, pid()} | {error, term()}.
+start_link(IpAddr, PortNum) ->
     gen_nb_server:start_link(?MODULE, IpAddr, PortNum, [PortNum]).
 
 %% @doc Initialization callback for gen_nb_server.
