@@ -2,7 +2,7 @@
 %%
 %% riak_api_pb_listener: Listen for protocol buffer clients
 %%
-%% Copyright (c) 2007-2010 Basho Technologies, Inc.  All Rights Reserved.
+%% Copyright (c) 2007-2012 Basho Technologies, Inc.  All Rights Reserved.
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -24,17 +24,16 @@
 
 -module(riak_api_pb_listener).
 -behaviour(gen_nb_server).
--export([start_link/0]).
+-export([start_link/2]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 -export([sock_opts/0, new_connection/2]).
+-export([get_port/0, get_ip/0]).
 -record(state, {portnum}).
 
 %% @doc Starts the PB listener
--spec start_link() -> {ok, pid()} | {error, term()}.
-start_link() ->
-    PortNum = app_helper:get_env(riak_api, pb_port),
-    IpAddr = app_helper:get_env(riak_api, pb_ip),
+-spec start_link(inet:ip_address() | string(),  non_neg_integer()) -> {ok, pid()} | {error, term()}.
+start_link(IpAddr, PortNum) ->
     gen_nb_server:start_link(?MODULE, IpAddr, PortNum, [PortNum]).
 
 %% @doc Initialization callback for gen_nb_server.
@@ -89,3 +88,38 @@ new_connection(Socket, State) ->
     ok = riak_api_pb_server:set_socket(Pid, Socket),
     {ok, State}.
 
+%% @private
+get_port() ->
+    Envs = [{riak_api, pb_port},
+            {riak_kv, pb_port}],
+    case app_helper:try_envs(Envs) of
+        {riak_api, pb_port, Port} ->
+            Port;
+        {riak_kv, pb_port, Port} ->
+            lager:warning("The config riak_kv/pb_port has been"
+                          " deprecated and will be removed.  Use"
+                          " riak_api/pb_port in the future."),
+            Port;
+        {default, undefined} ->
+            lager:warning("The config riak_api/pb_port is missing,"
+                          " PB connections will be disabled."),
+            undefined
+    end.
+
+%% @private
+get_ip() ->
+    Envs = [{riak_api, pb_ip},
+            {riak_kv, pb_ip}],
+    case app_helper:try_envs(Envs) of
+        {riak_api, pb_ip, IP} ->
+            IP;
+        {riak_kv, pb_ip, IP} ->
+            lager:warning("The config riak_kv/pb_ip has been"
+                          " deprecated and will be removed.  Use"
+                          " riak_api/pb_ip in the future."),
+            IP;
+        {default, undefined} ->
+            lager:warning("The config riak_api/pb_ip is missing,"
+                          " PB connections will be disabled."),
+            undefined
+    end.
