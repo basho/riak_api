@@ -83,6 +83,21 @@ handle_call({set_socket, Socket}, _From, State) ->
 
 %% @doc The handle_cast/2 gen_server callback.
 -spec handle_cast(Message::term(), State::#state{}) -> {noreply, NewState::#state{}}.
+handle_cast({registered, Module}, #state{states=ServiceStates}=State) ->
+    %% When a new service is registered after a client connection is
+    %% already established, update the internal state to support the
+    %% new capabilities.
+    NewStates = case dict:find(Module, ServiceStates) of
+                    error ->
+                        %% This is a new service registering
+                        dict:store(Module, Module:init(), ServiceStates);
+                    {ok, Module} ->
+                        %% This is an existing service registering
+                        %% disjoint message codes
+                        ServiceStates
+                end,
+    {noreply, State#state{dispatch=riak_api_pb_service:dispatch_table(),
+                          states=NewStates}};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
