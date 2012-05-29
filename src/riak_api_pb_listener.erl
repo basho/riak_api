@@ -28,6 +28,7 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 -export([sock_opts/0, new_connection/2]).
+-export([get_port/0, get_ip/0]).
 -record(state, {portnum}).
 
 %% @doc Starts the PB listener
@@ -102,7 +103,9 @@ get_port() ->
                           " riak_api/pb_port in the future."),
             Port;
         {default, undefined} ->
-            throw({error, "pb_port config not defined"})
+            lager:warning("The config riak_api/pb_port is missing,"
+                          " PB connections will be disabled."),
+            undefined
     end.
 
 %% @private
@@ -118,5 +121,7 @@ get_ip() ->
                           " riak_api/pb_ip in the future."),
             IP;
         {default, undefined} ->
-            throw({error, "pb_ip config not defined"})
+            lager:warning("The config riak_api/pb_ip is missing,"
+                          " PB connections will be disabled."),
+            undefined
     end.
