@@ -68,6 +68,20 @@ process_stream(_, _, State) ->
 %% Eunit tests
 %% ===================================================================
 setup() ->
+    application:start(syntax_tools),
+    application:start(compiler),
+
+    application:load(sasl),
+    application:set_env(sasl, sasl_error_logger, {file, "pb_service_test_sasl.log"}),
+    error_logger:tty(false),
+    error_logger:logfile({open, "pb_service_test.log"}),
+    application:start(sasl),
+
+    application:load(lager),
+    application:set_env(lager, handlers, [{lager_file_backend, [{"pb_service_test.log", debug, 10485760, "$D0", 5}]}]),
+    application:set_env(lager, error_logger_redirect, true),
+    ok = application:start(lager),
+
     OldServices = riak_api_pb_service:dispatch_table(),
     OldHost = app_helper:get_env(riak_api, pb_ip, "127.0.0.1"),
     OldPort = app_helper:get_env(riak_api, pb_port, 8087),
@@ -75,12 +89,6 @@ setup() ->
     application:set_env(riak_api, pb_ip, "127.0.0.1"),
     application:set_env(riak_api, pb_port, 32767),
     riak_api_pb_service:register(?MODULE, ?MSGMIN, ?MSGMAX),
-
-    application:load(sasl),
-    application:set_env(sasl, sasl_error_logger, {file, "pb_service_test_sasl.log"}),
-    error_logger:tty(false),
-    error_logger:logfile({open, "pb_service_test.log"}),
-    application:start(sasl),
 
     ok = application:start(riak_api),
     {OldServices, OldHost, OldPort}.
@@ -90,6 +98,7 @@ cleanup({S, H, P}) ->
     application:set_env(riak_api, services, S),
     application:set_env(riak_api, pb_ip, H),
     application:set_env(riak_api, pb_port, P),
+    application:stop(lager),
     ok.
 
 request(Code, Payload) when is_binary(Payload), is_integer(Code) ->

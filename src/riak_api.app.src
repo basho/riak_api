@@ -7,7 +7,6 @@
   {applications, [
                   kernel,
                   stdlib,
-                  sasl,
                   lager
                  ]},
   {registered, [riak_api_sup,
