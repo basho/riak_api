@@ -26,6 +26,8 @@ decode(106, <<>>) ->
     {ok, internalerror};
 decode(107, <<>>) ->
     {ok, stream};
+decode(110, _) ->
+    {ok, dummyreq};
 decode(_,_) ->
     {error, unknown_message}.
 
@@ -66,6 +68,20 @@ process_stream(_, _, State) ->
 %% Eunit tests
 %% ===================================================================
 setup() ->
+    application:start(syntax_tools),
+    application:start(compiler),
+
+    application:load(sasl),
+    application:set_env(sasl, sasl_error_logger, {file, "pb_service_test_sasl.log"}),
+    error_logger:tty(false),
+    error_logger:logfile({open, "pb_service_test.log"}),
+    application:start(sasl),
+
+    application:load(lager),
+    application:set_env(lager, handlers, [{lager_file_backend, [{"pb_service_test.log", debug, 10485760, "$D0", 5}]}]),
+    application:set_env(lager, error_logger_redirect, true),
+    ok = application:start(lager),
+
     OldServices = riak_api_pb_service:dispatch_table(),
     OldHost = app_helper:get_env(riak_api, pb_ip, "127.0.0.1"),
     OldPort = app_helper:get_env(riak_api, pb_port, 8087),
@@ -73,12 +89,6 @@ setup() ->
     application:set_env(riak_api, pb_ip, "127.0.0.1"),
     application:set_env(riak_api, pb_port, 32767),
     riak_api_pb_service:register(?MODULE, ?MSGMIN, ?MSGMAX),
-
-    application:load(sasl),
-    application:set_env(sasl, sasl_error_logger, {file, "pb_service_test_sasl.log"}),
-    error_logger:tty(false),
-    error_logger:logfile({open, "pb_service_test.log"}),
-    application:start(sasl),
 
     ok = application:start(riak_api),
     {OldServices, OldHost, OldPort}.
@@ -88,13 +98,14 @@ cleanup({S, H, P}) ->
     application:set_env(riak_api, services, S),
     application:set_env(riak_api, pb_ip, H),
     application:set_env(riak_api, pb_port, P),
+    application:stop(lager),
     ok.
 
 request(Code, Payload) when is_binary(Payload), is_integer(Code) ->
-    Host = app_helper:get_env(riak_api, pb_ip),
-    Port = app_helper:get_env(riak_api, pb_port),
-    {ok, Socket} = gen_tcp:connect(Host, Port, [binary, {active, false}, {packet,4},
-                                                {header, 1}, {nodelay, true}]),
+    {ok, Socket} = new_connection(),
+    request(Code, Payload, Socket).
+
+request(Code, Payload, Socket) when is_binary(Payload), is_integer(Code) ->
     ok = gen_tcp:send(Socket, <<Code:8, Payload/binary>>),
     {ok, Response} = gen_tcp:recv(Socket, 0),
     Response.
@@ -102,10 +113,7 @@ request(Code, Payload) when is_binary(Payload), is_integer(Code) ->
 request_stream(Code, Payload, DonePredicate) when is_binary(Payload),
                                                   is_integer(Code),
                                                   is_function(DonePredicate) ->
-    Host = app_helper:get_env(riak_api, pb_ip),
-    Port = app_helper:get_env(riak_api, pb_port),
-    {ok, Socket} = gen_tcp:connect(Host, Port, [binary, {active, false}, {packet,4},
-                                                {header, 1}, {nodelay, true}]),
+    {ok, Socket} = new_connection(),
     ok = gen_tcp:send(Socket, <<Code:8, Payload/binary>>),
     stream_loop([], gen_tcp:recv(Socket, 0), Socket, DonePredicate).
 
@@ -118,6 +126,11 @@ stream_loop(Acc0, {ok, [Code|Bin]=Packet}, Socket, Predicate) ->
             stream_loop(Acc, gen_tcp:recv(Socket, 0), Socket, Predicate)
     end.
 
+new_connection() ->
+    Host = app_helper:get_env(riak_api, pb_ip),
+    Port = app_helper:get_env(riak_api, pb_port),
+    gen_tcp:connect(Host, Port, [binary, {active, false}, {packet,4},
+                                 {header, 1}, {nodelay, true}]).
 
 simple_test_() ->
     {setup,
@@ -138,3 +151,21 @@ simple_test_() ->
       %% Internal service error
       ?_assertMatch([0|Bin] when is_binary(Bin), request(106, <<>>))
      ]}.
+
+late_registration_test_() ->
+    {setup,
+     fun setup/0,
+     fun cleanup/1,
+     ?_test(begin
+                %% First we check that the unregistered message code
+                %% returns an error to the client.
+                ?assertMatch([0|Bin] when is_binary(Bin), request(110, <<>>)),
+                %% Now we make a new connection
+                {ok, Socket} = new_connection(),
+                %% And with the connection open, register the message code late.
+                riak_api_pb_service:register(?MODULE, 110),
+                %% Now request the message and we should get success.
+                ?assertEqual([102|<<"ok">>], request(110, <<>>, Socket))
+            end)
+    }.
+

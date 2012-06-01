@@ -25,12 +25,25 @@
 -module(riak_api_pb_sup).
 -behaviour(supervisor).
 -export([start_link/0, init/1, stop/1]).
--export([start_socket/0]).
+-export([start_socket/0, service_registered/1]).
 
 %% @doc Starts a PB socket server.
 -spec start_socket() -> {ok, pid()} | {error, term()}.
 start_socket() ->
     supervisor:start_child(?MODULE, []).
+
+%% @doc Notifies connected client sockets of a new service so they can
+%% initialize it. Called internally by `riak_api_pb_service:register/3'.
+-spec service_registered(module()) -> ok.
+service_registered(Mod) ->
+    case erlang:whereis(?MODULE) of
+        undefined ->
+            ok;
+        _ ->
+            [ gen_server:cast(Pid, {registered, Mod}) ||
+                {_,Pid,_,_} <- supervisor:which_children(?MODULE) ],
+            ok
+    end.
 
 %% @doc Starts the PB server supervisor.
 -spec start_link() -> {ok, pid()} | {error, term()}.

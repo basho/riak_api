@@ -101,6 +101,7 @@ register(Module, MinCode, MaxCode) ->
                                           dict:store(I, Module, D)
                                   end, Registrations, CodeRange),
             application:set_env(riak_api, services, NewRegs),
+            riak_api_pb_sup:service_registered(Module),
             ok;
         AlreadyClaimed ->
             {error, {already_registered, AlreadyClaimed}}
