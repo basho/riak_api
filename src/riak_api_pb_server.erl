@@ -135,9 +135,10 @@ handle_info({tcp, _Sock, [MsgCode|MsgData]}, State=#state{
     catch
         %% Tell the client we errored before closing the connection.
         Type:Failure ->
-            lager:debug("Message processing error: ~p:~p ~p", [Type, Failure, erlang:get_stacktrace()]),
-            send_error("Error processing incoming message: ~p:~p", [Type, Failure], State),
-            {stop, {Type, Failure}, State}
+            Trace = erlang:get_stacktrace(),
+            send_error("Error processing incoming message: ~p:~p:~p",
+                       [Type, Failure, Trace], State),
+            {stop, {Type, Failure, Trace}, State}
     end
 ;
 handle_info({tcp, _Sock, _Data}, State) ->
@@ -160,15 +161,14 @@ handle_info(StreamMessage, #state{req={Service,ReqId},
     catch
         %% Tell the client we errored before closing the connection.
         Type:Reason ->
-            lager:debug("Streaming message processing error (State: ~p): ~p:~p ~p",
-                        [State, Type, Reason, erlang:get_stacktrace()]),
-            send_error("Error processing stream message: ~p:~p", [Type, Reason], State),
-            {stop, {Type, Reason}, State}
+            Trace = erlang:get_stacktrace(),
+            send_error("Error processing stream message: ~p:~p:~p",
+                       [Type, Reason, Trace], State),
+            {stop, {Type, Reason, Trace}, State}
     end;
 handle_info(Message, State) ->
-    %% Throw out messages we don't care about, but log them at the
-    %% debug level.
-    lager:debug("Unrecognized message ~p", [Message]),
+    %% Throw out messages we don't care about, but log them
+    lager:error("Unrecognized message ~p", [Message]),
     {noreply, State}.
 
 
@@ -265,7 +265,8 @@ send_encoded_message_or_error(Service, ReplyMessage, ServerState) ->
         {ok, Encoded} ->
             send_message(Encoded, ServerState);
         Error ->
-            lager:debug("PB service ~p could not encode message ~p: ~p", [Service, ReplyMessage, Error]),
+            lager:error("PB service ~p could not encode message ~p: ~p",
+                        [Service, ReplyMessage, Error]),
             send_error("Internal service error: no encoding for response message", ServerState)
     end.
 
