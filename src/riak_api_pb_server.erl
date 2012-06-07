@@ -211,8 +211,8 @@ process_message(Service, Message, ServiceState, ServerState) ->
             send_encoded_message_or_error(Service, ReplyMessage, ServerState),
             update_service_state(Service, NewServiceState, ServerState);
         %% Recoverable error
-        {error, Message, NewServiceState} ->
-            send_error(Message, ServerState),
+        {error, ErrorMessage, NewServiceState} ->
+            send_error(ErrorMessage, ServerState),
             update_service_state(Service, NewServiceState, ServerState);
         %% Result is broken
         Other ->
