@@ -43,7 +43,10 @@
 %% Service-provider API
 -export([register/1,
          register/2,
-         register/3]).
+         register/3,
+         deregister/1,
+         deregister/2,
+         deregister/3]).
 
 %% Server API
 -export([dispatch_table/0,
@@ -107,6 +110,54 @@ register(Module, MinCode, MaxCode) ->
             {error, {already_registered, AlreadyClaimed}}
     end.
 
+%% @doc Removes the registration of a number of services modules at
+%% once.
+%% @see deregister/3
+-spec deregister([registration()]) -> ok | {error, Reason::term()}.
+deregister([]) ->
+    ok;
+deregister([{Module, MinCode, MaxCode}|Rest]) ->
+    case deregister(Module, MinCode, MaxCode) of
+        ok ->
+            deregister(Rest);
+        Other ->
+            Other
+    end.
+
+%% @doc Removes the registration of a previously-registered service
+%% module. Inputs will be validated such that the registered module
+%% must match the one being removed.
+-spec deregister(Module::module(), Code::pos_integer()) -> ok | {error, Err::term()}.
+deregister(Module, Code) ->
+    Registrations = dispatch_table(),
+    case dict:find(Code, Registrations) of
+        error ->
+            {error, {unregistered, Code}};
+        {ok, Module} ->
+            NewRegs = dict:erase(Code, Registrations),
+            application:set_env(riak_api, services, NewRegs),
+            riak_api_pb_sup:service_registered(Module),
+            ok;
+        {ok, _OtherModule} ->
+            {error, {not_owned, Code}}
+    end.
+
+%% @doc Removes the registration of a previously-registered service
+%% module.
+%% @see deregister/2
+-spec deregister(Module::module(), MinCode::pos_integer(), MaxCode::pos_integer()) -> ok | {error, Err::term()}.
+deregister(_Module, MinCode, MaxCode) when MaxCode < MinCode ->
+    {error, invalid_message_code_range};
+deregister(Module, Code, Code) ->
+    deregister(Module, Code);
+deregister(Module, MinCode, MaxCode) ->
+    case deregister(Module, MinCode) of
+        ok ->
+            deregister(Module, MinCode + 1, MaxCode);
+        Error ->
+            Error
+    end.
+
 %% @doc Returns the current mappings from message codes to service
 %% modules. This is called by riak_api_pb_socket on startup so that
 %% dispatches don't hit the application env.
@@ -130,6 +181,32 @@ setup() ->
 cleanup(Services) ->
     application:set_env(riak_api, services, Services).
 
+deregister_test_() ->
+    {foreach,
+     fun setup/0,
+     fun cleanup/1,
+     [
+      %% Deregister a previously registered service
+      ?_assertEqual(ok, begin
+                            ok = register(foo, 1, 2),
+                            deregister(foo, 1, 2)
+                        end),
+      %% Invalid deregistration: range is invalid
+      ?_assertEqual({error, invalid_message_code_range}, deregister(foo, 2, 1)),
+      %% Invalid deregistration: unregistered range
+      ?_assertEqual({error, {unregistered, 1}}, deregister(foo, 1, 1)),
+      %% Invalid deregistration: registered to other service
+      ?_assertEqual({error, {not_owned, 1}}, begin
+                                                 ok = register(foo, 1, 2),
+                                                 deregister(bar, 1)
+                                             end),
+      %% Deregister multiple
+      ?_assertEqual(ok, begin
+                            ok = register([{foo, 1, 2}, {bar, 3, 4}]),
+                            deregister([{bar, 3, 4}, {foo, 1, 2}])
+                        end)
+     ]}.
+
 register_test_() ->
     {foreach,
      fun setup/0,
@@ -143,8 +220,6 @@ register_test_() ->
       %% Registration ranges that are invalid
       ?_assertEqual({error, invalid_message_code_range},
                     register(foo, 2, 1)),
-      ?_assertEqual({error, invalid_message_code_range},
-                    register(foo, 2, 1)),
       ?_assertEqual({error, {already_registered, [1, 2]}},
                     begin
                         ok = register(foo, 1, 2),
@@ -152,7 +227,7 @@ register_test_() ->
                     end),
       %% Register multiple
       ?_assertEqual(ok, register([{foo, 1, 2}, {bar, 3, 4}]))
-      ]}.
+     ]}.
 
 services_test_() ->
     {setup,
@@ -161,10 +236,10 @@ services_test_() ->
      [
       ?_assertEqual([], services()),
       ?_assertEqual([bar, foo], begin
-                                   register(foo, 1, 2),
-                                   register(bar, 3, 4),
-                                   services()
-                               end)
-      ]}.
+                                    register(foo, 1, 2),
+                                    register(bar, 3, 4),
+                                    services()
+                                end)
+     ]}.
 
 -endif.
