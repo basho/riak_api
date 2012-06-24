@@ -27,6 +27,9 @@
 -export([start/2,
          stop/1]).
 
+-define(SERVICES, [{riak_api_basic_pb_service, 1, 2},
+                   {riak_api_basic_pb_service, 7, 8}]).
+
 %% @doc The application:start callback.
 -spec start(Type, StartArgs)
            -> {ok, Pid} | {ok, Pid, State} | {error, Reason} when
@@ -43,8 +46,7 @@ start(_Type, _StartArgs) ->
     %% TODO: cluster_info registration. What do we expose?
     %% catch cluster_info:register_app(riak_api_cinfo),
 
-    ok = riak_api_pb_service:register(riak_api_basic_pb_service, 1, 2),
-    ok = riak_api_pb_service:register(riak_api_basic_pb_service, 7, 8),
+    ok = riak_api_pb_service:register(?SERVICES),
 
     case riak_api_sup:start_link() of
         {ok, Pid} ->
@@ -63,4 +65,5 @@ start(_Type, _StartArgs) ->
 %% @doc The application:stop callback.
 -spec stop(State::term()) -> ok.
 stop(_State) ->
+    ok = riak_api_pb_service:deregister(?SERVICES),
     ok.
