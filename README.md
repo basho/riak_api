@@ -5,6 +5,8 @@ public-facing interfaces. Currently this means a generic interface for
 exposing Protocol Buffers-based services; HTTP services via Webmachine
 will be moved here at a later time.
 
+[![Build Status](https://secure.travis-ci.org/basho/riak_api.png?branch=master)](http://travis-ci.org/basho/riak_api)
+
 ## Contributing
 
 We encourage contributions to `riak_api` from the community.
