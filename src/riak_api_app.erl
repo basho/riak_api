@@ -53,6 +53,8 @@ start(_Type, _StartArgs) ->
             %% and then propagate config information for client
             %% auto-config.
             %% riak_core:register(riak_api, []),
+            %% register stats
+            riak_api_stat:register_stats(),
             {ok, Pid};
         {error, Reason} ->
             {error, Reason}
