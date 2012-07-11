@@ -82,6 +82,10 @@ setup() ->
     application:set_env(lager, error_logger_redirect, true),
     ok = application:start(lager),
 
+    %% start the stat cache
+    ok = application:start(folsom),
+    riak_core_stat_cache:start_link(),
+
     OldServices = riak_api_pb_service:dispatch_table(),
     OldHost = app_helper:get_env(riak_api, pb_ip, "127.0.0.1"),
     OldPort = app_helper:get_env(riak_api, pb_port, 8087),
@@ -89,7 +93,6 @@ setup() ->
     application:set_env(riak_api, pb_ip, "127.0.0.1"),
     application:set_env(riak_api, pb_port, 32767),
     riak_api_pb_service:register(?MODULE, ?MSGMIN, ?MSGMAX),
-
     ok = application:start(riak_api),
     {OldServices, OldHost, OldPort}.
 
@@ -98,6 +101,8 @@ cleanup({S, H, P}) ->
     application:set_env(riak_api, services, S),
     application:set_env(riak_api, pb_ip, H),
     application:set_env(riak_api, pb_port, P),
+    application:stop(folsom),
+    riak_core_stat_cache:stop(),
     application:stop(lager),
     ok.
 
