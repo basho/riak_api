@@ -49,7 +49,8 @@ init([]) ->
     IsPbConfigured = (Port /= undefined) andalso (IP /= undefined),
     Processes = if IsPbConfigured ->
                         [?CHILD(riak_api_pb_sup, supervisor),
-                         ?CHILD(riak_api_pb_listener, worker, [IP, Port])];
+                         ?CHILD(riak_api_pb_listener, worker, [IP, Port]),
+                         ?CHILD(riak_api_stat, worker)];
                    true ->
                         []
                 end,

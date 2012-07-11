@@ -65,8 +65,7 @@ set_socket(Pid, Socket) ->
 %% riak_api_pb_server.
 -spec init(list()) -> {ok, #state{}}.
 init([]) ->
-    %% TODO: use Russell's new stats system
-    %% riak_kv_stat:update(pbc_connect)
+    riak_api_stat:update(pbc_connect),
     Dispatch = riak_api_pb_service:dispatch_table(),
     ServiceStates = lists:foldl(fun(Service, States) ->
                                         dict:store(Service, Service:init(), States)
@@ -178,8 +177,7 @@ handle_info(Message, State) ->
       Reason :: normal | shutdown | {shutdown,term()} | term(),
       State :: #state{}.
 terminate(_Reason, _State) ->
-    %% TODO: Update with Russell's new stats system
-    %% riak_kv_stat:update(pbc_disconnect),
+    riak_api_stat:update(pbc_disconnect),
     ok.
 
 %% @doc The gen_server code_change/3 callback, called when performing
