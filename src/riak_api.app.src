@@ -3,7 +3,7 @@
 {application, riak_api,
  [
   {description, "Riak Client APIs"},
-  {vsn, "1.0.0"},
+  {vsn, "1.2.0"},
   {applications, [
                   kernel,
                   stdlib,
