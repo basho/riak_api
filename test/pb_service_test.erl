@@ -68,23 +68,14 @@ process_stream(_, _, State) ->
 %% Eunit tests
 %% ===================================================================
 setup() ->
-    application:start(syntax_tools),
-    application:start(compiler),
+    Deps = resolve_deps(riak_api), %% Implicitly loads apps
 
-    application:load(sasl),
     application:set_env(sasl, sasl_error_logger, {file, "pb_service_test_sasl.log"}),
     error_logger:tty(false),
     error_logger:logfile({open, "pb_service_test.log"}),
-    application:start(sasl),
 
-    application:load(lager),
     application:set_env(lager, handlers, [{lager_file_backend, [{"pb_service_test.log", debug, 10485760, "$D0", 5}]}]),
     application:set_env(lager, error_logger_redirect, true),
-    ok = application:start(lager),
-
-    %% start the stat cache
-    ok = application:start(folsom),
-    riak_core_stat_cache:start_link(),
 
     OldServices = riak_api_pb_service:dispatch_table(),
     OldHost = app_helper:get_env(riak_api, pb_ip, "127.0.0.1"),
@@ -93,17 +84,15 @@ setup() ->
     application:set_env(riak_api, pb_ip, "127.0.0.1"),
     application:set_env(riak_api, pb_port, 32767),
     riak_api_pb_service:register(?MODULE, ?MSGMIN, ?MSGMAX),
-    ok = application:start(riak_api),
-    {OldServices, OldHost, OldPort}.
 
-cleanup({S, H, P}) ->
-    application:stop(riak_api),
+    [ application:start(A) || A <- Deps ],
+    {OldServices, OldHost, OldPort, Deps}.
+
+cleanup({S, H, P, Deps}) ->
+    [ application:stop(A) || A <- lists:reverse(Deps), not is_otp_base_app(A) ],
     application:set_env(riak_api, services, S),
     application:set_env(riak_api, pb_ip, H),
     application:set_env(riak_api, pb_port, P),
-    application:stop(folsom),
-    riak_core_stat_cache:stop(),
-    application:stop(lager),
     ok.
 
 request(Code, Payload) when is_binary(Payload), is_integer(Code) ->
@@ -174,3 +163,32 @@ late_registration_test_() ->
             end)
     }.
 
+
+%% The following three functions build a list of dependent
+%% applications. They will not handle circular or mutually-dependent
+%% applications.
+dep_apps(App) ->
+    application:load(App),
+    {ok, Apps} = application:get_key(App, applications),
+    Apps.
+
+all_deps(App) ->
+    [ all_deps(Dep) || Dep <- dep_apps(App) ] ++ [App].
+
+resolve_deps(App) ->
+    DepList = lists:flatten(all_deps(App)),
+    {AppOrder, _} = lists:foldl(fun(A,{List,Set}) ->
+                                        case sets:is_element(A, Set) of
+                                            true ->
+                                                {List, Set};
+                                            false ->
+                                                {List ++ [A], sets:add_element(A, Set)}
+                                        end
+                                end,
+                                {[], sets:new()},
+                                lists:flatten(DepList)),
+    AppOrder.
+
+is_otp_base_app(kernel) -> true;    
+is_otp_base_app(stdlib) -> true;
+is_otp_base_app(_) -> false.
