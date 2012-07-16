@@ -86,6 +86,7 @@ setup() ->
     riak_api_pb_service:register(?MODULE, ?MSGMIN, ?MSGMAX),
 
     [ application:start(A) || A <- Deps ],
+    wait_for_port(),
     {OldServices, OldHost, OldPort, Deps}.
 
 cleanup({S, H, P, Deps}) ->
@@ -164,6 +165,36 @@ late_registration_test_() ->
             end)
     }.
 
+wait_for_port() ->
+    wait_for_port(10000).
+
+wait_for_port(Timeout) when is_integer(Timeout) ->
+    lager:debug("Waiting for PB Port within timeout ~p", [Timeout]),
+    TRef = erlang:send_after(Timeout, self(), timeout),
+    wait_for_port(TRef);
+wait_for_port(TRef) ->
+    Me = self(),
+    erlang:spawn(fun() ->
+                         case new_connection() of
+                             {ok, Socket} ->
+                                 gen_tcp:close(Socket),
+                                 Me ! connected;
+                             {error, Reason} ->
+                                 Me ! {error, Reason}
+                         end
+                 end),
+    receive
+        timeout ->
+            lager:error("PB port did not come up within timeout"),
+            {error, timeout};
+        {error, Reason} ->
+            lager:debug("Waiting for PB port failed: ~p", [Reason]),
+            wait_for_port(TRef);
+        connected ->
+            erlang:cancel_timer(TRef),
+            lager:debug("PB port is up"),
+            ok
+    end.
 
 wait_for_application_shutdown(App) ->
     case lists:keymember(App, 1, application:which_applications()) of
