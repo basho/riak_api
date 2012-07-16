@@ -86,6 +86,7 @@ setup() ->
     riak_api_pb_service:register(?MODULE, ?MSGMIN, ?MSGMAX),
 
     [ application:start(A) || A <- Deps ],
+    riak_core:wait_for_application(riak_api),
     {OldServices, OldHost, OldPort, Deps}.
 
 cleanup({S, H, P, Deps}) ->
@@ -93,6 +94,7 @@ cleanup({S, H, P, Deps}) ->
     application:set_env(riak_api, services, S),
     application:set_env(riak_api, pb_ip, H),
     application:set_env(riak_api, pb_port, P),
+    wait_for_application_shutdown(riak_api),
     ok.
 
 request(Code, Payload) when is_binary(Payload), is_integer(Code) ->
@@ -163,6 +165,15 @@ late_registration_test_() ->
             end)
     }.
 
+
+wait_for_application_shutdown(App) ->
+    case lists:keymember(App, 1, application:which_applications()) of
+        true ->
+            timer:sleep(250),
+            wait_for_application_shutdown(App);
+        false ->
+            ok
+    end.
 
 %% The following three functions build a list of dependent
 %% applications. They will not handle circular or mutually-dependent
