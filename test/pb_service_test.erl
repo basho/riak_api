@@ -86,7 +86,6 @@ setup() ->
     riak_api_pb_service:register(?MODULE, ?MSGMIN, ?MSGMAX),
 
     [ application:start(A) || A <- Deps ],
-    riak_core:wait_for_application(riak_api),
     {OldServices, OldHost, OldPort, Deps}.
 
 cleanup({S, H, P, Deps}) ->
