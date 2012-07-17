@@ -77,6 +77,8 @@ setup() ->
     application:set_env(lager, handlers, [{lager_file_backend, [{"pb_service_test.log", debug, 10485760, "$D0", 5}]}]),
     application:set_env(lager, error_logger_redirect, true),
 
+    application:set_env(riak_core, handoff_port, 0),
+
     OldServices = riak_api_pb_service:dispatch_table(),
     OldHost = app_helper:get_env(riak_api, pb_ip, "127.0.0.1"),
     OldPort = app_helper:get_env(riak_api, pb_port, 8087),
@@ -214,7 +216,7 @@ dep_apps(App) ->
     Apps.
 
 all_deps(App) ->
-    [ all_deps(Dep) || Dep <- dep_apps(App) ] ++ [App].
+    [[ all_deps(Dep) || Dep <- dep_apps(App) ],App].
 
 resolve_deps(App) ->
     DepList = lists:flatten(all_deps(App)),
