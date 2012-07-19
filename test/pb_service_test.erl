@@ -68,23 +68,16 @@ process_stream(_, _, State) ->
 %% Eunit tests
 %% ===================================================================
 setup() ->
-    application:start(syntax_tools),
-    application:start(compiler),
+    Deps = resolve_deps(riak_api), %% Implicitly loads apps
 
-    application:load(sasl),
     application:set_env(sasl, sasl_error_logger, {file, "pb_service_test_sasl.log"}),
     error_logger:tty(false),
     error_logger:logfile({open, "pb_service_test.log"}),
-    application:start(sasl),
 
-    application:load(lager),
     application:set_env(lager, handlers, [{lager_file_backend, [{"pb_service_test.log", debug, 10485760, "$D0", 5}]}]),
     application:set_env(lager, error_logger_redirect, true),
-    ok = application:start(lager),
 
-    %% start the stat cache
-    ok = application:start(folsom),
-    riak_core_stat_cache:start_link(),
+    application:set_env(riak_core, handoff_port, 0),
 
     OldServices = riak_api_pb_service:dispatch_table(),
     OldHost = app_helper:get_env(riak_api, pb_ip, "127.0.0.1"),
@@ -93,17 +86,17 @@ setup() ->
     application:set_env(riak_api, pb_ip, "127.0.0.1"),
     application:set_env(riak_api, pb_port, 32767),
     riak_api_pb_service:register(?MODULE, ?MSGMIN, ?MSGMAX),
-    ok = application:start(riak_api),
-    {OldServices, OldHost, OldPort}.
 
-cleanup({S, H, P}) ->
-    application:stop(riak_api),
+    [ application:start(A) || A <- Deps ],
+    wait_for_port(),
+    {OldServices, OldHost, OldPort, Deps}.
+
+cleanup({S, H, P, Deps}) ->
+    [ application:stop(A) || A <- lists:reverse(Deps), not is_otp_base_app(A) ],
     application:set_env(riak_api, services, S),
     application:set_env(riak_api, pb_ip, H),
     application:set_env(riak_api, pb_port, P),
-    application:stop(folsom),
-    riak_core_stat_cache:stop(),
-    application:stop(lager),
+    wait_for_application_shutdown(riak_api),
     ok.
 
 request(Code, Payload) when is_binary(Payload), is_integer(Code) ->
@@ -174,3 +167,71 @@ late_registration_test_() ->
             end)
     }.
 
+wait_for_port() ->
+    wait_for_port(10000).
+
+wait_for_port(Timeout) when is_integer(Timeout) ->
+    lager:debug("Waiting for PB Port within timeout ~p", [Timeout]),
+    TRef = erlang:send_after(Timeout, self(), timeout),
+    wait_for_port(TRef);
+wait_for_port(TRef) ->
+    Me = self(),
+    erlang:spawn(fun() ->
+                         case new_connection() of
+                             {ok, Socket} ->
+                                 gen_tcp:close(Socket),
+                                 Me ! connected;
+                             {error, Reason} ->
+                                 Me ! {error, Reason}
+                         end
+                 end),
+    receive
+        timeout ->
+            lager:error("PB port did not come up within timeout"),
+            {error, timeout};
+        {error, Reason} ->
+            lager:debug("Waiting for PB port failed: ~p", [Reason]),
+            wait_for_port(TRef);
+        connected ->
+            erlang:cancel_timer(TRef),
+            lager:debug("PB port is up"),
+            ok
+    end.
+
+wait_for_application_shutdown(App) ->
+    case lists:keymember(App, 1, application:which_applications()) of
+        true ->
+            timer:sleep(250),
+            wait_for_application_shutdown(App);
+        false ->
+            ok
+    end.
+
+%% The following three functions build a list of dependent
+%% applications. They will not handle circular or mutually-dependent
+%% applications.
+dep_apps(App) ->
+    application:load(App),
+    {ok, Apps} = application:get_key(App, applications),
+    Apps.
+
+all_deps(App) ->
+    [[ all_deps(Dep) || Dep <- dep_apps(App) ],App].
+
+resolve_deps(App) ->
+    DepList = lists:flatten(all_deps(App)),
+    {AppOrder, _} = lists:foldl(fun(A,{List,Set}) ->
+                                        case sets:is_element(A, Set) of
+                                            true ->
+                                                {List, Set};
+                                            false ->
+                                                {List ++ [A], sets:add_element(A, Set)}
+                                        end
+                                end,
+                                {[], sets:new()},
+                                lists:flatten(DepList)),
+    AppOrder.
+
+is_otp_base_app(kernel) -> true;    
+is_otp_base_app(stdlib) -> true;
+is_otp_base_app(_) -> false.
