@@ -54,7 +54,7 @@ start(_Type, _StartArgs) ->
             %% auto-config.
             %% riak_core:register(riak_api, []),
             %% register stats
-            riak_api_stat:register_stats(),
+            riak_core:register(riak_api, [{stat_mod, riak_api_stat}]),
             {ok, Pid};
         {error, Reason} ->
             {error, Reason}
