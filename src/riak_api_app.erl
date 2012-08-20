@@ -43,20 +43,9 @@
 start(_Type, _StartArgs) ->
     riak_core_util:start_app_deps(riak_api),
 
-    %% TODO: cluster_info registration. What do we expose?
-    %% catch cluster_info:register_app(riak_api_cinfo),
-
-    ok = riak_api_pb_service:register(?SERVICES),
-
     case riak_api_sup:start_link() of
         {ok, Pid} ->
-            %% TODO: Is it necessary to register the service? We might
-            %% want to use the registration to cause service_up events
-            %% and then propagate config information for client
-            %% auto-config.
-            %% riak_core:register(riak_api, []),
-            %% register stats
-            riak_core:register(riak_api, [{stat_mod, riak_api_stat}]),
+            ok = riak_api_pb_service:register(?SERVICES),
             {ok, Pid};
         {error, Reason} ->
             {error, Reason}

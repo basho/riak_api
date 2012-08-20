@@ -85,10 +85,10 @@ setup() ->
     application:set_env(riak_api, services, dict:new()),
     application:set_env(riak_api, pb_ip, "127.0.0.1"),
     application:set_env(riak_api, pb_port, 32767),
-    riak_api_pb_service:register(?MODULE, ?MSGMIN, ?MSGMAX),
 
     [ application:start(A) || A <- Deps ],
     wait_for_port(),
+    riak_api_pb_service:register(?MODULE, ?MSGMIN, ?MSGMAX),
     {OldServices, OldHost, OldPort, Deps}.
 
 cleanup({S, H, P, Deps}) ->
