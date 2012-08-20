@@ -85,10 +85,10 @@ setup() ->
     application:set_env(riak_api, services, dict:new()),
     application:set_env(riak_api, pb_ip, "127.0.0.1"),
     application:set_env(riak_api, pb_port, 32767),
-    riak_api_pb_service:register(?MODULE, ?MSGMIN, ?MSGMAX),
 
     [ application:start(A) || A <- Deps ],
     wait_for_port(),
+    riak_api_pb_service:register(?MODULE, ?MSGMIN, ?MSGMAX),
     {OldServices, OldHost, OldPort, Deps}.
 
 cleanup({S, H, P, Deps}) ->
@@ -215,11 +215,12 @@ dep_apps(App) ->
     {ok, Apps} = application:get_key(App, applications),
     Apps.
 
-all_deps(App) ->
-    [[ all_deps(Dep) || Dep <- dep_apps(App) ],App].
+all_deps(App, Deps) ->
+    [[ all_deps(Dep, [App|Deps]) || Dep <- dep_apps(App),
+                                    not lists:member(Dep, Deps)], App].
 
 resolve_deps(App) ->
-    DepList = lists:flatten(all_deps(App)),
+    DepList = all_deps(App, []),
     {AppOrder, _} = lists:foldl(fun(A,{List,Set}) ->
                                         case sets:is_element(A, Set) of
                                             true ->
