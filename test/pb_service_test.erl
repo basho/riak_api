@@ -215,11 +215,12 @@ dep_apps(App) ->
     {ok, Apps} = application:get_key(App, applications),
     Apps.
 
-all_deps(App) ->
-    [[ all_deps(Dep) || Dep <- dep_apps(App) ],App].
+all_deps(App, Deps) ->
+    [[ all_deps(Dep, [App|Deps]) || Dep <- dep_apps(App),
+                                    not lists:member(Dep, Deps)], App].
 
 resolve_deps(App) ->
-    DepList = lists:flatten(all_deps(App)),
+    DepList = all_deps(App, []),
     {AppOrder, _} = lists:foldl(fun(A,{List,Set}) ->
                                         case sets:is_element(A, Set) of
                                             true ->
