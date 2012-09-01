@@ -48,10 +48,11 @@ init([]) ->
     IP = riak_api_pb_listener:get_ip(),
     IsPbConfigured = (Port /= undefined) andalso (IP /= undefined),
     Registrar = ?CHILD(riak_api_pb_registrar, worker),
+    Stat = ?CHILD(riak_api_stat, worker, []),
     NetworkProcesses = if IsPbConfigured ->
                                [?CHILD(riak_api_pb_sup, supervisor),
                                 ?CHILD(riak_api_pb_listener, worker, [IP, Port])];
                           true ->
                                []
                        end,
-    {ok, {{one_for_one, 10, 10}, [Registrar|NetworkProcesses]}}.
+    {ok, {{one_for_one, 10, 10}, [Registrar,Stat|NetworkProcesses]}}.
