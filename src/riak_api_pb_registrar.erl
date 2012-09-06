@@ -170,7 +170,13 @@ do_deregister(Module, MinCode, MaxCode) ->
 -ifdef(TEST).
 
 test_start() ->
-    gen_server:start({local, ?SERVER}, ?MODULE, [], []).
+    case gen_server:start({local, ?SERVER}, ?MODULE, [], []) of
+        {error, {already_started, Pid}} ->
+            exit(Pid, brutal_kill),
+            test_start();
+        {ok, Pid} ->
+            {ok, Pid}
+    end.
 
 setup() ->
     OldServices = app_helper:get_env(riak_api, services, dict:new()),
