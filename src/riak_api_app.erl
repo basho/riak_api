@@ -45,6 +45,8 @@ start(_Type, _StartArgs) ->
 
     case riak_api_sup:start_link() of
         {ok, Pid} ->
+            riak_core:register(riak_api, [{stat_mod, riak_api_stat}]),
+            wait_for_process(riak_api_pb_registrar),
             ok = riak_api_pb_service:register(?SERVICES),
             {ok, Pid};
         {error, Reason} ->
@@ -56,3 +58,15 @@ start(_Type, _StartArgs) ->
 stop(_State) ->
     ok = riak_api_pb_service:deregister(?SERVICES),
     ok.
+
+%% @doc Waits for a named process to start up. This way we make sure
+%% the registrar process is available before we try to register
+%% anything.
+-spec wait_for_process(atom() | pid()) -> ok.
+wait_for_process(Proc) ->
+    case erlang:whereis(Proc) of
+        undefined ->
+            timer:sleep(1000),
+            wait_for_process(Proc);
+        _Pid -> ok
+    end.
