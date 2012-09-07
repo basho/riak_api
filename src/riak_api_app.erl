@@ -45,6 +45,7 @@ start(_Type, _StartArgs) ->
 
     case riak_api_sup:start_link() of
         {ok, Pid} ->
+            riak_core:register(riak_api, [{stat_mod, riak_api_stat}]),
             ok = riak_api_pb_service:register(?SERVICES),
             {ok, Pid};
         {error, Reason} ->

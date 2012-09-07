@@ -93,10 +93,10 @@ setup() ->
 
 cleanup({S, H, P, Deps}) ->
     [ application:stop(A) || A <- lists:reverse(Deps), not is_otp_base_app(A) ],
+    wait_for_application_shutdown(riak_api),
     application:set_env(riak_api, services, S),
     application:set_env(riak_api, pb_ip, H),
     application:set_env(riak_api, pb_port, P),
-    wait_for_application_shutdown(riak_api),
     ok.
 
 request(Code, Payload) when is_binary(Payload), is_integer(Code) ->
