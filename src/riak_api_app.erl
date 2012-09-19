@@ -25,6 +25,7 @@
 
 -behaviour(application).
 -export([start/2,
+         prep_stop/1,
          stop/1]).
 
 %% @doc The application:start callback.
@@ -59,6 +60,16 @@ start(_Type, _StartArgs) ->
         {error, Reason} ->
             {error, Reason}
     end.
+
+prep_stop(_State) ->
+    lager:info("Preparing to stop riak_api\n", []),
+    riak_api_pb_listener:stop_listening(),    % No new clients
+    %% Optional delay to wait between stopping new connections
+    %% and stopping requests on the existing ones.
+    timer:sleep(app_helper:get_env(riak_api, graceful_stop_delay, 0)),
+    riak_api_pb_sup:graceful_stop_clients(),  % Tell existing ones to exit
+    stopping.
+
 
 %% @doc The application:stop callback.
 -spec stop(State::term()) -> ok.
