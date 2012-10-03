@@ -32,13 +32,14 @@
 
 -behaviour(gen_server).
 
--export([start_link/0, set_socket/2]).
+-export([start_link/0, set_socket/2, graceful_stop/1]).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
 -record(state, {
           socket :: port(),   % socket
+          mode = normal,      % normal or stopping (close after current request)
           req,                % current request
           dispatch :: dict(), % dispatch table of msg code -> service
           states :: dict()    % per-service connection state
@@ -61,6 +62,9 @@ start_link() ->
 set_socket(Pid, Socket) ->
     gen_server:call(Pid, {set_socket, Socket}, infinity).
 
+graceful_stop(Pid) ->
+    gen_server:cast(Pid, graceful_stop).
+
 %% @doc The gen_server init/1 callback, initializes the
 %% riak_api_pb_server.
 -spec init(list()) -> {ok, #state{}}.
@@ -82,6 +86,8 @@ handle_call({set_socket, Socket}, _From, State) ->
 
 %% @doc The handle_cast/2 gen_server callback.
 -spec handle_cast(Message::term(), State::#state{}) -> {noreply, NewState::#state{}}.
+handle_cast(graceful_stop, State) ->
+    {noreply, State#state{mode = stopping}};
 handle_cast({registered, Service}, #state{states=ServiceStates}=State) ->
     %% When a new service is registered after a client connection is
     %% already established, update the internal state to support the
@@ -129,8 +135,13 @@ handle_info({tcp, _Sock, [MsgCode|MsgData]}, State=#state{
                 send_error("Unknown message code.", State),
                 NewState = State
         end,
-        inet:setopts(Socket, [{active, once}]),
-        {noreply, NewState}
+        case NewState#state.mode of
+            stop ->
+                {stop, normal, NewState};
+            _ -> % normal or stopping
+                inet:setopts(Socket, [{active, once}]),
+                {noreply, NewState}
+        end
     catch
         %% Tell the client we errored before closing the connection.
         Type:Failure ->
@@ -251,9 +262,16 @@ process_stream(Service, ReqId, Message, ServiceState0, State) ->
 
 %% @doc Updates the given service state and puts it in the server's state.
 -spec update_service_state(module(), term(), #state{}) -> #state{}.
-update_service_state(Service, NewServiceState, #state{states=ServiceStates}=ServerState) ->
+update_service_state(Service, NewServiceState, 
+                     #state{states=ServiceStates,mode=Mode,req=Req}=ServerState) ->
     NewServiceStates = dict:store(Service, NewServiceState, ServiceStates),
-    ServerState#state{states=NewServiceStates}.
+    NewMode = case {Mode, Req} of
+                  {stopping, undefined} ->
+                      stop;
+                  _ ->
+                      Mode
+              end,
+    ServerState#state{states=NewServiceStates,mode=NewMode}.
 
 %% @doc Given an unencoded response message, attempts to encode it and send it
 %% to the client.

@@ -26,6 +26,7 @@
 -behaviour(supervisor).
 -export([start_link/0, init/1, stop/1]).
 -export([start_socket/0, service_registered/1]).
+-export([graceful_stop_clients/0]).
 
 %% @doc Starts a PB socket server.
 -spec start_socket() -> {ok, pid()} | {error, term()}.
@@ -53,6 +54,14 @@ start_link() ->
 %% @doc Stops the PB server supervisor.
 -spec stop(term()) -> ok.
 stop(_S) -> ok.
+
+%% @doc Send all clients the signal to exit 
+-spec graceful_stop_clients() -> ok.
+graceful_stop_clients() ->
+    [riak_api_pb_server:graceful_stop(Pid) || 
+        {_, Pid, _, _} <- supervisor:which_children(?MODULE)],
+    ok.
+    
 
 %% @doc The init/1 supervisor callback, initializes the supervisor.
 -spec init(list()) -> {ok,{{RestartStrategy,MaxR,MaxT},[ChildSpec]}} | ignore when

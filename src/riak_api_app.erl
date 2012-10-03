@@ -25,6 +25,7 @@
 
 -behaviour(application).
 -export([start/2,
+         prep_stop/1,
          stop/1]).
 
 %% @doc The application:start callback.
@@ -60,7 +61,26 @@ start(_Type, _StartArgs) ->
             {error, Reason}
     end.
 
+%% @doc Prepare to stop - called before the supervisor tree is shutdown
+prep_stop(_State) ->
+    try %% wrap with a try/catch - application carries on regardless,
+        %% no error message or logging about the failure otherwise.
+        lager:info("Stopping application riak_api - stopping listening.\n", []),
+        riak_api_sup:stop_listening(),    % No new clients
+
+        %% Optional delay to wait between stopping new connections
+        %% and stopping requests on the existing ones.
+        timer:sleep(app_helper:get_env(riak_api, graceful_stop_delay, 0)),
+        lager:info("Stopping application riak_api - stopping clients.\n", []),
+        riak_api_pb_sup:graceful_stop_clients()  % Tell existing ones to exit
+    catch
+        Type:Reason ->
+            lager:error("Stopping application riak_api - ~p:~p.\n", [Type, Reason])
+    end,
+    stopping.
+
 %% @doc The application:stop callback.
 -spec stop(State::term()) -> ok.
 stop(_State) ->
+    lager:info("Stopped  application riak_api.\n", []),
     ok.

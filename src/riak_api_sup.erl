@@ -27,7 +27,9 @@
 -behaviour(supervisor).
 
 -export([start_link/0,
-         init/1]).
+         init/1,
+         restart_listening/0,
+         stop_listening/0]).
 
 -define(CHILD(I, Type), {I, {I, start_link, []}, permanent, 5000, Type, [I]}).
 -define(CHILD(I, Type, Args), {I, {I, start_link, Args}, permanent, 5000, Type, [I]}).
@@ -54,3 +56,9 @@ init([]) ->
                         []
                 end,
     {ok, {{one_for_one, 10, 10}, Processes}}.
+
+restart_listening() ->
+    supervisor:restart_child(?MODULE, riak_api_pb_listener).
+
+stop_listening() ->
+    supervisor:terminate_child(?MODULE, riak_api_pb_listener).
