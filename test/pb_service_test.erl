@@ -79,22 +79,19 @@ setup() ->
 
     application:set_env(riak_core, handoff_port, 0),
 
-    OldServices = riak_api_pb_service:dispatch_table(),
     OldHost = app_helper:get_env(riak_api, pb_ip, "127.0.0.1"),
     OldPort = app_helper:get_env(riak_api, pb_port, 8087),
-    application:set_env(riak_api, services, dict:new()),
     application:set_env(riak_api, pb_ip, "127.0.0.1"),
     application:set_env(riak_api, pb_port, 32767),
 
     [ application:start(A) || A <- Deps ],
     wait_for_port(),
     riak_api_pb_service:register(?MODULE, ?MSGMIN, ?MSGMAX),
-    {OldServices, OldHost, OldPort, Deps}.
+    {OldHost, OldPort, Deps}.
 
-cleanup({S, H, P, Deps}) ->
+cleanup({H, P, Deps}) ->
     [ application:stop(A) || A <- lists:reverse(Deps), not is_otp_base_app(A) ],
     wait_for_application_shutdown(riak_api),
-    application:set_env(riak_api, services, S),
     application:set_env(riak_api, pb_ip, H),
     application:set_env(riak_api, pb_port, P),
     ok.
