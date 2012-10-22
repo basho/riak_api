@@ -45,7 +45,7 @@ process(stream, State) ->
     Ref = make_ref(),
     spawn_link(fun() ->
                        Server ! {Ref, foo},
-                       Server ! {Ref, bar},
+                       Server ! {Ref, multi},
                        Server ! {Ref, done}
                end),
     {reply, {stream, Ref}, State};
@@ -58,6 +58,8 @@ process(dummyreq, State) ->
 
 process_stream({Ref,done}, Ref, State) ->
     {done, State};
+process_stream({Ref, multi}, Ref, State) ->
+    {reply, [foo, bar], State};
 process_stream({Ref,Msg}, Ref, State) ->
     {reply, Msg, State};
 process_stream(_, _, State) ->
@@ -138,7 +140,7 @@ simple_test_() ->
       %% Happy path, sync operation
       ?_assertEqual([102|<<"ok">>], request(101, <<>>)),
       %% Happy path, streaming operation
-      ?_assertEqual([{108, <<"foo">>},{109,<<"bar">>}],
+      ?_assertEqual([{108, <<"foo">>},{108, <<"foo">>},{109,<<"bar">>}],
                     request_stream(107, <<>>, fun([Code|_]) -> Code == 109 end)),
       %% Unknown request message code
       ?_assertMatch([0|Bin] when is_binary(Bin), request(105, <<>>)),

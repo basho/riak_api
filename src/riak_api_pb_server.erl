@@ -229,6 +229,10 @@ process_stream(Service, ReqId, Message, ServiceState0, State) ->
         %% doesn't care about.
         {ignore, ServiceState} ->
             update_service_state(Service, ServiceState, State);
+        %% Sending multiple replies in middle-of-stream
+        {reply, Replies, ServiceState} when is_list(Replies) ->
+            [ send_encoded_message_or_error(Service, Reply, State) || Reply <- Replies ],
+            update_service_state(Service, ServiceState, State);
         %% Regular middle-of-stream messages
         {reply, Reply, ServiceState} ->
             send_encoded_message_or_error(Service, Reply, State),
