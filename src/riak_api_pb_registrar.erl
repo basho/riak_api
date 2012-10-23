@@ -73,7 +73,15 @@ register(Registrations) ->
 %% @doc Deregisters a range of message codes registered to named services.
 -spec deregister([riak_api_pb_service:registration()]) -> ok | {error, Reason::term()}.
 deregister(Registrations) ->
-    gen_server:call(?SERVER, {deregister, Registrations}, infinity).
+    try
+        gen_server:call(?SERVER, {deregister, Registrations}, infinity)
+    catch
+        exit:{noproc, _} ->
+            %% We assume riak_api is shutting down, and so silently
+            %% ignore the deregistration.
+            lager:debug("Deregistration ~p ignored, ~s not present", [Registrations, ?SERVER]),
+            ok
+    end.
 
 %% @doc Sets the heir of the registrations table on behalf of the
 %%      helper process.
@@ -229,8 +237,8 @@ setup() ->
     {Pid, HelperPid}.
 
 cleanup({Pid, HelperPid}) ->
-    exit(Pid, kill),
-    exit(HelperPid, kill).
+    exit(Pid, brutal_kill),
+    exit(HelperPid, brutal_kill).
 
 deregister_test_() ->
     {foreach,
@@ -253,8 +261,8 @@ deregister_test_() ->
                                              end),
       %% Deregister multiple
       ?_assertEqual(ok, begin
-                            ok = register([{foo, 1, 2}, {bar, 3, 4}]),
-                            deregister([{bar, 3, 4}, {foo, 1, 2}])
+                            ok = riak_api_pb_service:register([{foo, 1, 2}, {bar, 3, 4}]),
+                            riak_api_pb_service:deregister([{bar, 3, 4}, {foo, 1, 2}])
                         end)
      ]}.
 
@@ -305,7 +313,8 @@ registration_inheritance_test_() ->
       %% it causes it to become owner again.
       ?_test(begin
                  Helper = whereis(riak_api_pb_registration_helper),
-                 exit(whereis(?SERVER), brutal_kill),
+                 Registrar = whereis(?MODULE),
+                 exit(Registrar, brutal_kill),
                  erlang:yield(),
                  ?assertEqual(Helper, proplists:get_value(owner, ets:info(?ETS_NAME))),
                  NewReg = test_start(?MODULE),
@@ -320,6 +329,7 @@ registration_inheritance_test_() ->
       ?_test(begin
                  Helper = whereis(riak_api_pb_registration_helper),
                  exit(Helper, brutal_kill),
+                 erlang:yield(),
                  NewHelper = test_start(riak_api_pb_registration_helper),
                  erlang:yield(),
                  ?assertEqual(NewHelper, proplists:get_value(heir, ets:info(?ETS_NAME)))

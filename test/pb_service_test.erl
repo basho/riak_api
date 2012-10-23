@@ -85,6 +85,7 @@ setup() ->
     application:set_env(riak_api, pb_port, 32767),
 
     [ application:start(A) || A <- Deps ],
+    riak_core:wait_for_application(riak_api),
     wait_for_port(),
     riak_api_pb_service:register(?MODULE, ?MSGMIN, ?MSGMAX),
     {OldHost, OldPort, Deps}.
@@ -163,6 +164,18 @@ late_registration_test_() ->
                 ?assertEqual([102|<<"ok">>], request(110, <<>>, Socket))
             end)
     }.
+
+deregister_during_shutdown_test_() ->
+    {setup,
+     fun setup/0,
+     fun cleanup/1,
+     ?_test(begin
+                %% Shutdown riak_api
+                application:stop(riak_api),
+                %% Make sure deregistration doesn't fail
+                ?assertEqual(ok, riak_api_pb_service:deregister(?MODULE, ?MSGMIN, ?MSGMAX))
+            end)
+     }.
 
 wait_for_port() ->
     wait_for_port(10000).
