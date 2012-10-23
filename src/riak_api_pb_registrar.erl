@@ -40,35 +40,83 @@
 -export([
          start_link/0,
          register/1,
-         deregister/1
+         deregister/1,
+         set_heir/1,
+         services/0,
+         lookup/1
         ]).
+
+-record(state, {
+          opq = [] :: [ tuple() ], %% A list of registrations to reply to once we have the table
+          owned = false :: boolean() %% Whether the registrar owns the table yet
+         }).
+
+-include("riak_api_pb_registrar.hrl").
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
--import(riak_api_pb_service, [services/0, dispatch_table/0]).
-
 %%--------------------------------------------------------------------
 %%% Public API
 %%--------------------------------------------------------------------
+
+%% @doc Starts the registrar server
 -spec start_link() -> {ok, pid()}.
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
+%% @doc Registers a range of message codes to named services.
 -spec register([riak_api_pb_service:registration()]) -> ok | {error, Reason::term()}.
 register(Registrations) ->
     gen_server:call(?SERVER, {register, Registrations}, infinity).
 
+%% @doc Deregisters a range of message codes registered to named services.
 -spec deregister([riak_api_pb_service:registration()]) -> ok | {error, Reason::term()}.
 deregister(Registrations) ->
-    gen_server:call(?SERVER, {deregister, Registrations}, infinity).
+    try
+        gen_server:call(?SERVER, {deregister, Registrations}, infinity)
+    catch
+        exit:{noproc, _} ->
+            %% We assume riak_api is shutting down, and so silently
+            %% ignore the deregistration.
+            lager:debug("Deregistration ~p ignored, ~s not present", [Registrations, ?SERVER]),
+            ok
+    end.
+
+%% @doc Sets the heir of the registrations table on behalf of the
+%%      helper process.
+%% @private
+-spec set_heir(pid()) -> ok.
+set_heir(Pid) ->
+    gen_server:call(?SERVER, {set_heir, Pid}, infinity).
+
+%% @doc Lists registered service modules.
+-spec services() -> [ module() ].
+services() ->
+    lists:usort([ Service || {_Code, Service} <- ets:tab2list(?ETS_NAME)]).
+
+%% @doc Looks up the registration of a given message code.
+-spec lookup(non_neg_integer()) -> {ok, module()} | error.
+lookup(Code) ->
+    case ets:lookup(?ETS_NAME, Code) of
+        [{Code, Service}] ->  {ok, Service};
+        _ -> error
+    end.
 
 %%--------------------------------------------------------------------
 %%% gen_server callbacks
 %%--------------------------------------------------------------------
 init([]) ->
-    {ok, undefined}.
+    ok = riak_api_pb_registration_helper:claim_table(),
+    {ok, #state{}}.
 
+handle_call({Op, Args}, From, #state{opq=OpQ, owned=false}=State) ->
+    %% Since we don't own the process yet, we enqueue the registration
+    %% operations until we get the ETS-TRANSFER message.
+    {noreply, State#state{opq=[{{Op, Args}, From}|OpQ]}};
+handle_call({set_heir, Pid}, _From, #state{owned=true}=State) ->
+    ets:setopts(?ETS_NAME, [{heir, Pid, undefined}]),
+    {reply, ok, State};
 handle_call({register, Registrations}, _From, State) ->
     Reply = do_register(Registrations),
     {reply, Reply, State};
@@ -79,6 +127,11 @@ handle_call({deregister, Registrations}, _From, State) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
+handle_info({'ETS-TRANSFER', ?ETS_NAME, _, _}, #state{opq=OpQ, owned=false}=State) ->
+    %% We've queued up a bunch of registration/deregistration ops,
+    %% lets process them now that we have the table.
+    NewState = lists:foldr(fun queue_folder/2, State#state{opq=[], owned=true}, OpQ),
+    {noreply, NewState};
 handle_info(_Info, State) ->
     {noreply, State}.
 
@@ -91,6 +144,10 @@ code_change(_OldVsn, State, _Extra) ->
 %%--------------------------------------------------------------------
 %%% Internal functions
 %%--------------------------------------------------------------------
+queue_folder({Op, From}, FState) ->
+    {reply, Reply, NewFState} = handle_call(Op, From, FState),
+    gen_server:reply(From, Reply),
+    NewFState.
 
 do_register([]) ->
     ok;
@@ -103,19 +160,14 @@ do_register([{Module, MinCode, MaxCode}|Rest]) ->
     end.
 
 do_register(_Module, MinCode, MaxCode) when MinCode > MaxCode orelse
-MinCode < 1 orelse
-MaxCode < 1 ->
+                                            MinCode < 1 orelse
+                                            MaxCode < 1 ->
     {error, invalid_message_code_range};
 do_register(Module, MinCode, MaxCode) ->
-    Registrations = dispatch_table(),
-    IsRegistered = fun(I) -> dict:is_key(I, Registrations) end,
     CodeRange = lists:seq(MinCode, MaxCode),
-    case lists:filter(IsRegistered, CodeRange) of
+    case lists:filter(fun is_registered/1, CodeRange) of
         [] ->
-            NewRegs = lists:foldl(fun(I, D) ->
-                                          dict:store(I, Module, D)
-                                  end, Registrations, CodeRange),
-            application:set_env(riak_api, services, NewRegs),
+            ets:insert(?ETS_NAME, [{Code, Module} || Code <- CodeRange ]),
             riak_api_pb_sup:service_registered(Module),
             ok;
         AlreadyClaimed ->
@@ -138,26 +190,23 @@ MinCode < 1 orelse
 MaxCode < 1 ->
     {error, invalid_message_code_range};
 do_deregister(Module, MinCode, MaxCode) ->
-    Registrations = dispatch_table(),
     CodeRange = lists:seq(MinCode, MaxCode),
     %% Figure out whether all of the codes can be deregistered.
     Mapper = fun(I) ->
-                     case dict:find(I, Registrations) of
-                         error ->
+                     case ets:lookup(?ETS_NAME, I) of
+                         [] ->
                              {error, {unregistered, I}};
-                         {ok, Module} ->
+                         [{I, Module}] ->
                              I;
-                         {ok, _OtherModule} ->
+                         [{I, _OtherModule}] ->
                              {error, {not_owned, I}}
                      end
              end,
     ToRemove = [ Mapper(I) || I <- CodeRange ],
     case ToRemove of
         CodeRange ->
-            %% All codes are valid, so remove them, set the env and
-            %% notify active server processes.
-            NewRegs = lists:foldl(fun dict:erase/2, Registrations, CodeRange),
-            application:set_env(riak_api, services, NewRegs),
+            %% All codes are valid, so remove them.
+            [ ets:delete(?ETS_NAME, Code) || Code <- CodeRange ],
             riak_api_pb_sup:service_registered(Module),
             ok;
         _ ->
@@ -165,28 +214,31 @@ do_deregister(Module, MinCode, MaxCode) ->
             lists:keyfind(error, 1, ToRemove)
     end.
 
-
+is_registered(Code) ->
+    ets:member(?ETS_NAME, Code).
 
 -ifdef(TEST).
 
 test_start() ->
-    case gen_server:start({local, ?SERVER}, ?MODULE, [], []) of
+    %% Since registration is now a pair of processes, we need both.
+    {ok, test_start(riak_api_pb_registration_helper), test_start(?MODULE)}.
+
+test_start(Module) ->
+    case gen_server:start({local, Module}, Module, [], []) of
         {error, {already_started, Pid}} ->
             exit(Pid, brutal_kill),
-            test_start();
+            test_start(Module);
         {ok, Pid} ->
-            {ok, Pid}
+            Pid
     end.
 
 setup() ->
-    OldServices = app_helper:get_env(riak_api, services, dict:new()),
-    application:set_env(riak_api, services, dict:new()),
-    {ok, Pid} = test_start(),
-    {Pid, OldServices}.
+    {ok, HelperPid, Pid} = test_start(),
+    {Pid, HelperPid}.
 
-cleanup({Pid, Services}) ->
-    exit(Pid, kill),
-    application:set_env(riak_api, services, Services).
+cleanup({Pid, HelperPid}) ->
+    exit(Pid, brutal_kill),
+    exit(HelperPid, brutal_kill).
 
 deregister_test_() ->
     {foreach,
@@ -209,8 +261,8 @@ deregister_test_() ->
                                              end),
       %% Deregister multiple
       ?_assertEqual(ok, begin
-                            ok = register([{foo, 1, 2}, {bar, 3, 4}]),
-                            deregister([{bar, 3, 4}, {foo, 1, 2}])
+                            ok = riak_api_pb_service:register([{foo, 1, 2}, {bar, 3, 4}]),
+                            riak_api_pb_service:deregister([{bar, 3, 4}, {foo, 1, 2}])
                         end)
      ]}.
 
@@ -220,9 +272,9 @@ register_test_() ->
      fun cleanup/1,
      [
       %% Valid registration range
-      ?_assertEqual(foo, begin
+      ?_assertEqual({ok, foo}, begin
                              ok = riak_api_pb_service:register(foo,1,2),
-                             dict:fetch(1, dispatch_table())
+                             lookup(1)
                          end),
       %% Registration ranges that are invalid
       ?_assertEqual({error, invalid_message_code_range},
@@ -247,6 +299,69 @@ services_test_() ->
                                     riak_api_pb_service:register(bar, 3, 4),
                                     services()
                                 end)
+     ]}.
+
+registration_inheritance_test_() ->
+    {foreach,
+     fun setup/0,
+     fun({Pid, HelperPid}) ->
+         [ exit(P, brutal_kill) || P <- [Pid, HelperPid],
+                                   is_process_alive(P) ]
+     end,
+     [
+      %% Killing registrar causes helper to receive table. Restarting
+      %% it causes it to become owner again.
+      ?_test(begin
+                 Helper = whereis(riak_api_pb_registration_helper),
+                 Registrar = whereis(?MODULE),
+                 exit(Registrar, brutal_kill),
+                 erlang:yield(),
+                 ?assertEqual(Helper, proplists:get_value(owner, ets:info(?ETS_NAME))),
+                 NewReg = test_start(?MODULE),
+                 erlang:yield(),
+                 ?assertEqual(NewReg, proplists:get_value(owner, ets:info(?ETS_NAME))),
+                 ?assertEqual(Helper, proplists:get_value(heir, ets:info(?ETS_NAME))),
+                 exit(NewReg, brutal_kill)
+             end),
+
+      %% Killing and restarting helper causes it to become
+      %% the heir again.
+      ?_test(begin
+                 Helper = whereis(riak_api_pb_registration_helper),
+                 exit(Helper, brutal_kill),
+                 erlang:yield(),
+                 NewHelper = test_start(riak_api_pb_registration_helper),
+                 erlang:yield(),
+                 ?assertEqual(NewHelper, proplists:get_value(heir, ets:info(?ETS_NAME)))
+             end),
+
+      %% Registrar should queue up requests while it is not in
+      %% ownership of the table.
+      ?_test(begin
+                 Outer = self(),
+                 %% Helper = whereis(riak_api_pb_registration_helper),
+                 Registrar = whereis(?MODULE),
+                 exit(Registrar, brutal_kill),
+                 meck:new(riak_api_pb_registration_helper, [passthrough]),
+                 meck:expect(riak_api_pb_registration_helper, handle_call,
+                             fun(claim_table, {Pid, _Tag}=From, State) ->
+                                     gen_server:reply(From, ok),
+                                     timer:sleep(100),
+                                     ets:give_away(?ETS_NAME, Pid, undefined),
+                                     {noreply, State}
+                             end),
+                 NewReg = test_start(?MODULE),
+                 spawn(fun() ->
+                               Outer ! {100, riak_api_pb_service:register(foo, 100, 100)}
+                       end),
+                 spawn(fun() ->
+                               Outer ! {101, riak_api_pb_service:register(foo, 101, 101)}
+                       end),
+                 ?assertEqual(ok, receive {100, Msg} -> Msg after 1500 -> fail end),
+                 ?assertEqual(ok, receive {101, Msg} -> Msg after 1500 -> fail end),
+                 meck:unload(),
+                 exit(NewReg, brutal_kill)
+             end)
      ]}.
 
 -endif.

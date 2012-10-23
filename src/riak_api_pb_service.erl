@@ -44,10 +44,6 @@
          deregister/2,
          deregister/3]).
 
-%% Server API
--export([dispatch_table/0,
-         services/0]).
-
 -type registration() :: {Service::module(), MinCode::pos_integer(), MaxCode::pos_integer()}.
 
 -export_type([registration/0]).
@@ -109,16 +105,3 @@ deregister(Module, Code) ->
 -spec deregister(Module::module(), MinCode::pos_integer(), MaxCode::pos_integer()) -> ok | {error, Err::term()}.
 deregister(Module, MinCode, MaxCode) ->
     deregister([{Module, MinCode, MaxCode}]).
-
-%% @doc Returns the current mappings from message codes to service
-%% modules. This is called by riak_api_pb_socket on startup so that
-%% dispatches don't hit the application env.
--spec dispatch_table() -> dict().
-dispatch_table() ->
-    app_helper:get_env(riak_api, services, dict:new()).
-
-%% @doc Returns the current registered PB services, based on the
-%% dispatch_table().
--spec services() -> [ module() ].
-services() ->
-    lists:usort([ V || {_K,V} <- dict:to_list(dispatch_table()) ]).
