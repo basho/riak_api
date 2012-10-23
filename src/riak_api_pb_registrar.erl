@@ -333,6 +333,34 @@ registration_inheritance_test_() ->
                  NewHelper = test_start(riak_api_pb_registration_helper),
                  erlang:yield(),
                  ?assertEqual(NewHelper, proplists:get_value(heir, ets:info(?ETS_NAME)))
+             end),
+
+      %% Registrar should queue up requests while it is not in
+      %% ownership of the table.
+      ?_test(begin
+                 Outer = self(),
+                 %% Helper = whereis(riak_api_pb_registration_helper),
+                 Registrar = whereis(?MODULE),
+                 exit(Registrar, brutal_kill),
+                 meck:new(riak_api_pb_registration_helper, [passthrough]),
+                 meck:expect(riak_api_pb_registration_helper, handle_call,
+                             fun(claim_table, {Pid, _Tag}=From, State) ->
+                                     gen_server:reply(From, ok),
+                                     timer:sleep(100),
+                                     ets:give_away(?ETS_NAME, Pid, undefined),
+                                     {noreply, State}
+                             end),
+                 NewReg = test_start(?MODULE),
+                 spawn(fun() ->
+                               Outer ! {100, riak_api_pb_service:register(foo, 100, 100)}
+                       end),
+                 spawn(fun() ->
+                               Outer ! {101, riak_api_pb_service:register(foo, 101, 101)}
+                       end),
+                 ?assertEqual(ok, receive {100, Msg} -> Msg after 1500 -> fail end),
+                 ?assertEqual(ok, receive {101, Msg} -> Msg after 1500 -> fail end),
+                 meck:unload(),
+                 exit(NewReg, brutal_kill)
              end)
      ]}.
 
