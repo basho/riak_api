@@ -28,6 +28,8 @@ decode(107, <<>>) ->
     {ok, stream};
 decode(110, _) ->
     {ok, dummyreq};
+decode(111, _) ->
+    {ok, stream_multi};
 decode(_,_) ->
     {error, unknown_message}.
 
@@ -45,8 +47,17 @@ process(stream, State) ->
     Ref = make_ref(),
     spawn_link(fun() ->
                        Server ! {Ref, foo},
-                       Server ! {Ref, multi},
+                       Server ! {Ref, foo},
+                       Server ! {Ref, bar},
                        Server ! {Ref, done}
+               end),
+    {reply, {stream, Ref}, State};
+process(stream_multi, State) ->
+    Server = self(),
+    Ref = make_ref(),
+    spawn_link(fun() ->
+                       Server ! {Ref, multi},
+                       Server ! {Ref, multi_done}
                end),
     {reply, {stream, Ref}, State};
 process(internalerror, State) ->
@@ -56,10 +67,12 @@ process(badresponse, State) ->
 process(dummyreq, State) ->
     {reply, ok, State}.
 
+process_stream({Ref,multi_done}, Ref, State) ->
+    {done, [foo, bar], State};
 process_stream({Ref,done}, Ref, State) ->
     {done, State};
 process_stream({Ref, multi}, Ref, State) ->
-    {reply, [foo, bar], State};
+    {reply, [foo, foo], State};
 process_stream({Ref,Msg}, Ref, State) ->
     {reply, Msg, State};
 process_stream(_, _, State) ->
@@ -91,6 +104,7 @@ setup() ->
     [ application:start(A) || A <- Deps ],
     wait_for_port(),
     riak_api_pb_service:register(?MODULE, ?MSGMIN, ?MSGMAX),
+    riak_api_pb_service:register(?MODULE, 111),
     {OldServices, OldHost, OldPort, Deps}.
 
 cleanup({S, H, P, Deps}) ->
@@ -142,6 +156,9 @@ simple_test_() ->
       %% Happy path, streaming operation
       ?_assertEqual([{108, <<"foo">>},{108, <<"foo">>},{109,<<"bar">>}],
                     request_stream(107, <<>>, fun([Code|_]) -> Code == 109 end)),
+      %% Happy path, multi-message streaming
+      ?_assertEqual([{108, <<"foo">>},{108, <<"foo">>},{108, <<"foo">>}, {109,<<"bar">>}],
+                    request_stream(111, <<>>, fun([Code|_]) -> Code == 109 end)),
       %% Unknown request message code
       ?_assertMatch([0|Bin] when is_binary(Bin), request(105, <<>>)),
       %% Undecodable request message code
@@ -235,6 +252,6 @@ resolve_deps(App) ->
                                 lists:flatten(DepList)),
     AppOrder.
 
-is_otp_base_app(kernel) -> true;    
+is_otp_base_app(kernel) -> true;
 is_otp_base_app(stdlib) -> true;
 is_otp_base_app(_) -> false.

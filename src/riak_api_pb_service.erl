@@ -150,8 +150,9 @@
 %% interpreted as sending multiple messages to the client in one pass.
 %% Error tuples have similar semantics to `process/2', but will also
 %% cause the service to exit streaming mode. The `ignore' tuple will
-%% cause the server to do nothing. The `done' tuples signal a normal
-%% end to the streaming operation, with an optional reply to the client.
+%% cause the server to do nothing. The `done' tuples have the same
+%% semantics as `reply' (including multi-message replies) and `ignore'
+%% but signal a normal end of the streaming operation.
 %% @end
 
 -module(riak_api_pb_service).
