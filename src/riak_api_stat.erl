@@ -58,7 +58,8 @@ get_stats() ->
     end.
 
 produce_stats() ->
-    {?APP, [{Name, get_metric_value({?APP, Name}, Type)} || {Name, Type} <- stats()]}.
+    {?APP, [{Name, get_metric_value({?APP, Name}, Type)} || {Name, Type} <- stats()]
+     ++ [{pbc_connects_active, active_pb_connects()}]}.
 
 update(Arg) ->
     gen_server:cast(?SERVER, {update, Arg}).
@@ -90,24 +91,21 @@ code_change(_OldVsn, State, _Extra) ->
 %% @doc Update the given `Stat'.
 -spec update1(term()) -> ok.
 update1(pbc_connect) ->
-    folsom_metrics:notify_existing_metric({?APP, pbc_connects_active}, {inc, 1}, counter),
-    folsom_metrics:notify_existing_metric({?APP, pbc_connects}, 1, spiral);
-update1(pbc_disconnect) ->
-    folsom_metrics:notify_existing_metric({?APP, pbc_connects_active}, {dec, 1}, counter).
+    folsom_metrics:notify_existing_metric({?APP, pbc_connects}, 1, spiral).
 
 %% -------------------------------------------------------------------
 %% Private
 %% -------------------------------------------------------------------
+active_pb_connects() ->
+    proplists:get_value(active, supervisor:count_children(riak_api_pb_sup)).
+
 get_metric_value(Name, _Type) ->
     folsom_metrics:get_metric_value(Name).
 
 stats() ->
     [
-     {pbc_connects, spiral},
-     {pbc_connects_active, counter}
+     {pbc_connects, spiral}
     ].
 
 register_stat(Name, spiral) ->
-    folsom_metrics:new_spiral({?APP, Name});
-register_stat(Name, counter) ->
-    folsom_metrics:new_counter({?APP, Name}).
+    folsom_metrics:new_spiral({?APP, Name}).
