@@ -111,7 +111,7 @@ init([]) ->
     {ok, #state{}}.
 
 handle_call({Op, Args}, From, #state{opq=OpQ, owned=false}=State) ->
-    %% Since we don't own the process yet, we enqueue the registration
+    %% Since we don't own the table yet, we enqueue the registration
     %% operations until we get the ETS-TRANSFER message.
     {noreply, State#state{opq=[{{Op, Args}, From}|OpQ]}};
 handle_call({set_heir, Pid}, _From, #state{owned=true}=State) ->
