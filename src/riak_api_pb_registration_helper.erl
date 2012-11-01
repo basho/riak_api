@@ -22,8 +22,8 @@
 
 %% @doc A gen_server process that creates and serves as heir to the
 %% message-code registration ETS table. Should the registrar process
-%% exit, this table will inherit the ETS table and hand it back to the
-%% registrar process when it restarts.
+%% exit, this server will inherit the ETS table and hand it back to
+%% the registrar process when it restarts.
 -module(riak_api_pb_registration_helper).
 
 -behaviour(gen_server).
