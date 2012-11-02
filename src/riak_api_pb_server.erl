@@ -40,7 +40,6 @@
 -record(state, {
           socket :: port(),   % socket
           req,                % current request
-          dispatch :: dict(), % dispatch table of msg code -> service
           states :: dict()    % per-service connection state
          }).
 
@@ -66,13 +65,11 @@ set_socket(Pid, Socket) ->
 -spec init(list()) -> {ok, #state{}}.
 init([]) ->
     riak_api_stat:update(pbc_connect),
-    Dispatch = riak_api_pb_service:dispatch_table(),
     ServiceStates = lists:foldl(fun(Service, States) ->
                                         dict:store(Service, Service:init(), States)
                                 end,
-                                dict:new(), riak_api_pb_service:services()),
-    {ok, #state{dispatch=Dispatch,
-                states=ServiceStates}}.
+                                dict:new(), riak_api_pb_registrar:services()),
+    {ok, #state{states=ServiceStates}}.
 
 %% @doc The handle_call/3 gen_server callback.
 -spec handle_call(Message::term(), From::{pid(),term()}, State::#state{}) -> {reply, Message::term(), NewState::#state{}}.
@@ -86,16 +83,14 @@ handle_cast({registered, Service}, #state{states=ServiceStates}=State) ->
     %% When a new service is registered after a client connection is
     %% already established, update the internal state to support the
     %% new capabilities.
-    NewDispatch = riak_api_pb_service:dispatch_table(),
     case dict:is_key(Service, ServiceStates) of
         true ->
             %% This is an existing service registering
             %% disjoint message codes
-            {noreply, State#state{dispatch=NewDispatch}};
+            {noreply, State};
         false ->
             %% This is a new service registering
-            {noreply, State#state{dispatch=NewDispatch,
-                                  states=dict:store(Service, Service:init(), ServiceStates)}}
+            {noreply, State#state{states=dict:store(Service, Service:init(), ServiceStates)}}
     end;
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -109,25 +104,24 @@ handle_info({tcp_error, Socket, _Reason}, State=#state{socket=Socket}) ->
 handle_info({tcp, _Sock, [MsgCode|MsgData]}, State=#state{
                                                socket=Socket,
                                                req=undefined,
-                                               dispatch=Dispatch,
                                                states=ServiceStates}) ->
     try
         %% First find the appropriate service module to dispatch
-        case dict:find(MsgCode, Dispatch) of
+        NewState = case riak_api_pb_registrar:lookup(MsgCode) of
             {ok, Service} ->
                 %% Decode the message according to the service
                 case Service:decode(MsgCode, MsgData) of
                     {ok, Message} ->
                         %% Process the message
                         ServiceState = dict:fetch(Service, ServiceStates),
-                        NewState = process_message(Service, Message, ServiceState, State);
+                        process_message(Service, Message, ServiceState, State);
                     {error, Reason} ->
                         send_error("Message decoding error: ~p", [Reason], State),
-                        NewState = State
+                        State
                 end;
             error ->
                 send_error("Unknown message code.", State),
-                NewState = State
+                State
         end,
         inet:setopts(Socket, [{active, once}]),
         {noreply, NewState}
@@ -138,8 +132,7 @@ handle_info({tcp, _Sock, [MsgCode|MsgData]}, State=#state{
             send_error("Error processing incoming message: ~p:~p:~p",
                        [Type, Failure, Trace], State),
             {stop, {Type, Failure, Trace}, State}
-    end
-;
+    end;
 handle_info({tcp, _Sock, _Data}, State) ->
     %% req =/= undefined: received a new request while another was in
     %% progress -> Error
