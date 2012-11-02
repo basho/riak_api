@@ -168,7 +168,3 @@ terminate(_Reason, _State) ->
 -spec code_change(term(), term(), term()) -> {ok, term()}.
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
-
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================
