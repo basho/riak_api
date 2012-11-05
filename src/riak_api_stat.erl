@@ -45,7 +45,7 @@ start_link() ->
 
 register_stats() ->
     [(catch folsom_metrics:delete_metric({?APP, Name})) || {Name, _Type} <- stats()],
-    [register_stat(Stat, Type) || {Stat, Type} <- stats()],
+    [register_stat(stat_name(Stat), Type) || {Stat, Type} <- stats()],
     riak_core_stat_cache:register_app(?APP, {?MODULE, produce_stats, []}).
 
 %% @doc Return current aggregation of all stats.
@@ -58,8 +58,7 @@ get_stats() ->
     end.
 
 produce_stats() ->
-    {?APP, [{Name, get_metric_value({?APP, Name}, Type)} || {Name, Type} <- stats()]
-     ++ [{pbc_connects_active, active_pb_connects()}]}.
+    {?APP, []}.
 
 update(Arg) ->
     gen_server:cast(?SERVER, {update, Arg}).
@@ -96,16 +95,23 @@ update1(pbc_connect) ->
 %% -------------------------------------------------------------------
 %% Private
 %% -------------------------------------------------------------------
-active_pb_connects() ->
-    proplists:get_value(active, supervisor:count_children(riak_api_pb_sup)).
-
-get_metric_value(Name, _Type) ->
-    folsom_metrics:get_metric_value(Name).
-
 stats() ->
+    F = fun() ->
+                proplists:get_value(active, supervisor:count_children(riak_api_pb_sup))
+        end,
     [
-     {pbc_connects, spiral}
+     {pbc_connects, spiral},
+     {[pbc_connects, active],
+      {function, F}}
     ].
 
+stat_name(Name) when is_list(Name) ->
+    list_to_tuple([?APP] ++ Name);
+stat_name(Name) when is_atom(Name) ->
+    {?APP, Name}.
+
 register_stat(Name, spiral) ->
-    folsom_metrics:new_spiral({?APP, Name}).
+    folsom_metrics:new_spiral(Name);
+register_stat(Name, {function, Fun}) ->
+    folsom_metrics:new_gauge(Name),
+    folsom_metrics:notify({Name, Fun}).
