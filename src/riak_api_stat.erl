@@ -58,7 +58,7 @@ get_stats() ->
     end.
 
 produce_stats() ->
-    {?APP, []}.
+    {?APP, riak_core_stat_q:get_stats([riak_api])}.
 
 update(Arg) ->
     gen_server:cast(?SERVER, {update, Arg}).
