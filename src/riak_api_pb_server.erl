@@ -170,7 +170,6 @@ handle_info(Message, State) ->
       Reason :: normal | shutdown | {shutdown,term()} | term(),
       State :: #state{}.
 terminate(_Reason, _State) ->
-    riak_api_stat:update(pbc_disconnect),
     ok.
 
 %% @doc The gen_server code_change/3 callback, called when performing
