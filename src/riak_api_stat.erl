@@ -27,7 +27,8 @@
          get_stats/0,
          produce_stats/0,
          update/1,
-         stats/0]).
+         stats/0,
+         active_pb_connects/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -45,7 +46,7 @@ start_link() ->
 
 register_stats() ->
     [(catch folsom_metrics:delete_metric({?APP, Name})) || {Name, _Type} <- stats()],
-    [register_stat(Stat, Type) || {Stat, Type} <- stats()],
+    [register_stat(stat_name(Stat), Type) || {Stat, Type} <- stats()],
     riak_core_stat_cache:register_app(?APP, {?MODULE, produce_stats, []}).
 
 %% @doc Return current aggregation of all stats.
@@ -58,8 +59,7 @@ get_stats() ->
     end.
 
 produce_stats() ->
-    {?APP, [{Name, get_metric_value({?APP, Name}, Type)} || {Name, Type} <- stats()]
-     ++ [{pbc_connects_active, active_pb_connects()}]}.
+    {?APP, riak_core_stat_q:get_stats([riak_api])}.
 
 update(Arg) ->
     gen_server:cast(?SERVER, {update, Arg}).
@@ -96,16 +96,23 @@ update1(pbc_connect) ->
 %% -------------------------------------------------------------------
 %% Private
 %% -------------------------------------------------------------------
-active_pb_connects() ->
-    proplists:get_value(active, supervisor:count_children(riak_api_pb_sup)).
-
-get_metric_value(Name, _Type) ->
-    folsom_metrics:get_metric_value(Name).
-
 stats() ->
     [
-     {pbc_connects, spiral}
+     {pbc_connects, spiral},
+     {[pbc_connects, active],
+      {function, ?MODULE, active_pb_connects}}
     ].
 
+stat_name(Name) when is_list(Name) ->
+    list_to_tuple([?APP] ++ Name);
+stat_name(Name) when is_atom(Name) ->
+    {?APP, Name}.
+
 register_stat(Name, spiral) ->
-    folsom_metrics:new_spiral({?APP, Name}).
+    folsom_metrics:new_spiral(Name);
+register_stat(Name, {function, _Module, _Function}=Fun) ->
+    folsom_metrics:new_gauge(Name),
+    folsom_metrics:notify({Name, Fun}).
+
+active_pb_connects() ->
+    proplists:get_value(active, supervisor:count_children(riak_api_pb_sup)).
