@@ -27,7 +27,8 @@
          get_stats/0,
          produce_stats/0,
          update/1,
-         stats/0]).
+         stats/0,
+         active_pb_connects/0]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -96,13 +97,10 @@ update1(pbc_connect) ->
 %% Private
 %% -------------------------------------------------------------------
 stats() ->
-    F = fun() ->
-                proplists:get_value(active, supervisor:count_children(riak_api_pb_sup))
-        end,
     [
      {pbc_connects, spiral},
      {[pbc_connects, active],
-      {function, F}}
+      {function, ?MODULE, active_pb_connects}}
     ].
 
 stat_name(Name) when is_list(Name) ->
@@ -112,6 +110,9 @@ stat_name(Name) when is_atom(Name) ->
 
 register_stat(Name, spiral) ->
     folsom_metrics:new_spiral(Name);
-register_stat(Name, {function, Fun}) ->
+register_stat(Name, {function, _Module, _Function}=Fun) ->
     folsom_metrics:new_gauge(Name),
     folsom_metrics:notify({Name, Fun}).
+
+active_pb_connects() ->
+    proplists:get_value(active, supervisor:count_children(riak_api_pb_sup)).
