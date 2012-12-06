@@ -195,15 +195,15 @@ process_message(Service, Message, ServiceState, ServerState) ->
     case Service:process(Message, ServiceState) of
         %% Streaming reply with reference
         {reply, {stream, ReqId}, NewServiceState} ->
-            update_service_state(Service, NewServiceState, ServerState#state{req={Service,ReqId}});
+            update_service_state(Service, NewServiceState, ServiceState, ServerState#state{req={Service,ReqId}});
         %% Normal reply
         {reply, ReplyMessage, NewServiceState} ->
             send_encoded_message_or_error(Service, ReplyMessage, ServerState),
-            update_service_state(Service, NewServiceState, ServerState);
+            update_service_state(Service, NewServiceState, ServiceState, ServerState);
         %% Recoverable error
         {error, ErrorMessage, NewServiceState} ->
             send_error(ErrorMessage, ServerState),
-            update_service_state(Service, NewServiceState, ServerState);
+            update_service_state(Service, NewServiceState, ServiceState, ServerState);
         %% Result is broken
         Other ->
             send_error("Unknown PB service response: ~p", [Other], ServerState),
@@ -220,38 +220,41 @@ process_stream(Service, ReqId, Message, ServiceState0, State) ->
         %% Give the service the opportunity to throw out messages it
         %% doesn't care about.
         {ignore, ServiceState} ->
-            update_service_state(Service, ServiceState, State);
+            update_service_state(Service, ServiceState, ServiceState0, State);
         %% Sending multiple replies in middle-of-stream
         {reply, Replies, ServiceState} when is_list(Replies) ->
             [ send_encoded_message_or_error(Service, Reply, State) || Reply <- Replies ],
-            update_service_state(Service, ServiceState, State);
+            update_service_state(Service, ServiceState, ServiceState0, State);
         %% Regular middle-of-stream messages
         {reply, Reply, ServiceState} ->
             send_encoded_message_or_error(Service, Reply, State),
-            update_service_state(Service, ServiceState, State);
+            update_service_state(Service, ServiceState, ServiceState0, State);
         %% Stop the stream with multiple final replies
         {done, Replies, ServiceState} when is_list(Replies) ->
             [ send_encoded_message_or_error(Service, Reply, State) || Reply <- Replies ],
-            update_service_state(Service, ServiceState, State#state{req=undefined});
+            update_service_state(Service, ServiceState, ServiceState0, State#state{req=undefined});
         %% Stop the stream with a final reply
         {done, Reply, ServiceState} ->
             send_encoded_message_or_error(Service, Reply, State),
-            update_service_state(Service, ServiceState, State#state{req=undefined});
+            update_service_state(Service, ServiceState, ServiceState0, State#state{req=undefined});
         %% Stop the stream without sending a client reply
         {done, ServiceState} ->
-            update_service_state(Service, ServiceState, State#state{req=undefined});
+            update_service_state(Service, ServiceState, ServiceState0, State#state{req=undefined});
         %% Send the client normal errors
         {error, Reason, ServiceState} ->
             send_error(Reason, State),
-            update_service_state(Service, ServiceState, State#state{req=undefined});
+            update_service_state(Service, ServiceState, ServiceState0, State#state{req=undefined});
         Other ->
             send_error("Unknown PB service response: ~p", [Other], State),
             State
     end.
 
 %% @doc Updates the given service state and puts it in the server's state.
--spec update_service_state(module(), term(), #state{}) -> #state{}.
-update_service_state(Service, NewServiceState, #state{states=ServiceStates}=ServerState) ->
+-spec update_service_state(module(), term(), term(), #state{}) -> #state{}.
+update_service_state(_Service, OldServiceState, OldServiceState, ServerState) ->
+    %% If the service state is unchanged, don't bother storing it again.
+    ServerState;
+update_service_state(Service, NewServiceState, _OldServiceState, #state{states=ServiceStates}=ServerState) ->
     NewServiceStates = orddict:store(Service, NewServiceState, ServiceStates),
     ServerState#state{states=NewServiceStates}.
 
