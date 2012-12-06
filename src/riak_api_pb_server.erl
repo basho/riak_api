@@ -40,7 +40,7 @@
 -record(state, {
           socket :: port(),   % socket
           req,                % current request
-          states :: dict()    % per-service connection state
+          states :: orddict:orddict()    % per-service connection state
          }).
 
 -type format() :: {format, term()} | {format, io:format(), [term()]}.
@@ -66,9 +66,9 @@ set_socket(Pid, Socket) ->
 init([]) ->
     riak_api_stat:update(pbc_connect),
     ServiceStates = lists:foldl(fun(Service, States) ->
-                                        dict:store(Service, Service:init(), States)
+                                        orddict:store(Service, Service:init(), States)
                                 end,
-                                dict:new(), riak_api_pb_registrar:services()),
+                                orddict:new(), riak_api_pb_registrar:services()),
     {ok, #state{states=ServiceStates}}.
 
 %% @doc The handle_call/3 gen_server callback.
@@ -83,14 +83,14 @@ handle_cast({registered, Service}, #state{states=ServiceStates}=State) ->
     %% When a new service is registered after a client connection is
     %% already established, update the internal state to support the
     %% new capabilities.
-    case dict:is_key(Service, ServiceStates) of
+    case orddict:is_key(Service, ServiceStates) of
         true ->
             %% This is an existing service registering
             %% disjoint message codes
             {noreply, State};
         false ->
             %% This is a new service registering
-            {noreply, State#state{states=dict:store(Service, Service:init(), ServiceStates)}}
+            {noreply, State#state{states=orddict:store(Service, Service:init(), ServiceStates)}}
     end;
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -113,7 +113,7 @@ handle_info({tcp, _Sock, [MsgCode|MsgData]}, State=#state{
                 case Service:decode(MsgCode, MsgData) of
                     {ok, Message} ->
                         %% Process the message
-                        ServiceState = dict:fetch(Service, ServiceStates),
+                        ServiceState = orddict:fetch(Service, ServiceStates),
                         process_message(Service, Message, ServiceState, State);
                     {error, Reason} ->
                         send_error("Message decoding error: ~p", [Reason], State),
@@ -147,7 +147,7 @@ handle_info(StreamMessage, #state{req={Service,ReqId},
     %% valid when a streaming request has started, other messages will
     %% be ignored.
     try
-        ServiceState = dict:fetch(Service, ServiceStates),
+        ServiceState = orddict:fetch(Service, ServiceStates),
         NewState = process_stream(Service, ReqId, StreamMessage, ServiceState, State),
         {noreply, NewState}
     catch
@@ -252,7 +252,7 @@ process_stream(Service, ReqId, Message, ServiceState0, State) ->
 %% @doc Updates the given service state and puts it in the server's state.
 -spec update_service_state(module(), term(), #state{}) -> #state{}.
 update_service_state(Service, NewServiceState, #state{states=ServiceStates}=ServerState) ->
-    NewServiceStates = dict:store(Service, NewServiceState, ServiceStates),
+    NewServiceStates = orddict:store(Service, NewServiceState, ServiceStates),
     ServerState#state{states=NewServiceStates}.
 
 %% @doc Given an unencoded response message, attempts to encode it and send it
