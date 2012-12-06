@@ -140,15 +140,13 @@ handle_info({tcp, _Sock, _Data}, State) ->
                 " while another was in progress"),
     send_error("Cannot send another request while one is in progress", State),
     {stop, normal, State};
-handle_info(StreamMessage, #state{req={Service,ReqId},
-                                  states=ServiceStates}=State) ->
+handle_info(StreamMessage, #state{req={Service,ReqId,StreamState}}=State) ->
     %% Handle streaming messages from other processes. This should
     %% help avoid creating extra middlemen. Naturally, this is only
     %% valid when a streaming request has started, other messages will
     %% be ignored.
     try
-        ServiceState = orddict:fetch(Service, ServiceStates),
-        NewState = process_stream(Service, ReqId, StreamMessage, ServiceState, State),
+        NewState = process_stream(Service, ReqId, StreamMessage, StreamState, State),
         {noreply, NewState}
     catch
         %% Tell the client we errored before closing the connection.
@@ -195,7 +193,7 @@ process_message(Service, Message, ServiceState, ServerState) ->
     case Service:process(Message, ServiceState) of
         %% Streaming reply with reference
         {reply, {stream, ReqId}, NewServiceState} ->
-            update_service_state(Service, NewServiceState, ServiceState, ServerState#state{req={Service,ReqId}});
+            update_service_state(Service, NewServiceState, ServiceState, ServerState#state{req={Service,ReqId,NewServiceState}});
         %% Normal reply
         {reply, ReplyMessage, NewServiceState} ->
             send_encoded_message_or_error(Service, ReplyMessage, ServerState),
@@ -251,6 +249,12 @@ process_stream(Service, ReqId, Message, ServiceState0, State) ->
 
 %% @doc Updates the given service state and puts it in the server's state.
 -spec update_service_state(module(), term(), term(), #state{}) -> #state{}.
+update_service_state(Service, NewServiceState, _OldServiceState, #state{req={Service,ReqId,_StreamState}}=ServerState) ->
+    %% While streaming, we avoid extra fetches of the state by
+    %% including it in the current request field. When req is
+    %% undefined (set at the end of the stream), it will be updated
+    %% into the orddict.
+    ServerState#state{req={Service,ReqId,NewServiceState}};
 update_service_state(_Service, OldServiceState, OldServiceState, ServerState) ->
     %% If the service state is unchanged, don't bother storing it again.
     ServerState;
