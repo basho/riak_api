@@ -40,7 +40,8 @@
 -record(state, {
           socket :: port(),   % socket
           req,                % current request
-          states :: orddict:orddict()    % per-service connection state
+          states :: orddict:orddict(),    % per-service connection state
+          buffer = riak_api_pb_frame:new() :: riak_api_pb_frame:buffer() % frame buffer which we can use to optimize TCP sends
          }).
 
 -type format() :: {format, term()} | {format, io:format(), [term()]}.
@@ -74,7 +75,7 @@ init([]) ->
 %% @doc The handle_call/3 gen_server callback.
 -spec handle_call(Message::term(), From::{pid(),term()}, State::#state{}) -> {reply, Message::term(), NewState::#state{}}.
 handle_call({set_socket, Socket}, _From, State) ->
-    inet:setopts(Socket, [{active, once}, {packet, 4}, {header, 1}]),
+    inet:setopts(Socket, [{active, once}, {header, 1}]),
     {reply, ok, State#state{socket = Socket}}.
 
 %% @doc The handle_cast/2 gen_server callback.
@@ -87,16 +88,20 @@ handle_cast({registered, Service}, #state{states=ServiceStates}=State) ->
         true ->
             %% This is an existing service registering
             %% disjoint message codes
-            {noreply, State};
+            {noreply, State, 0};
         false ->
             %% This is a new service registering
-            {noreply, State#state{states=orddict:store(Service, Service:init(), ServiceStates)}}
+            {noreply, State#state{states=orddict:store(Service, Service:init(), ServiceStates)}, 0}
     end;
 handle_cast(_Msg, State) ->
-    {noreply, State}.
+    {noreply, State, 0}.
 
 %% @doc The handle_info/2 gen_server callback.
 -spec handle_info(Message::term(), State::#state{}) -> {noreply, NewState::#state{}} | {stop, Reason::atom(), NewState::#state{}}.
+handle_info(timeout, #state{buffer=Buffer}=State) ->
+    %% Flush any protocol messages that have been buffering
+    {ok, Data, NewBuffer} = riak_api_pb_frame:flush(Buffer),
+    {noreply, flush(Data, State#state{buffer=NewBuffer})};
 handle_info({tcp_closed, Socket}, State=#state{socket=Socket}) ->
     {stop, normal, State};
 handle_info({tcp_error, Socket, _Reason}, State=#state{socket=Socket}) ->
@@ -116,30 +121,28 @@ handle_info({tcp, _Sock, [MsgCode|MsgData]}, State=#state{
                         ServiceState = orddict:fetch(Service, ServiceStates),
                         process_message(Service, Message, ServiceState, State);
                     {error, Reason} ->
-                        send_error("Message decoding error: ~p", [Reason], State),
-                        State
+                        send_error("Message decoding error: ~p", [Reason], State)
                 end;
             error ->
-                send_error("Unknown message code.", State),
-                State
+                send_error("Unknown message code.", State)
         end,
         inet:setopts(Socket, [{active, once}]),
-        {noreply, NewState}
+        {noreply, NewState, 0}
     catch
         %% Tell the client we errored before closing the connection.
         Type:Failure ->
             Trace = erlang:get_stacktrace(),
-            send_error("Error processing incoming message: ~p:~p:~p",
-                       [Type, Failure, Trace], State),
-            {stop, {Type, Failure, Trace}, State}
+            FState = send_error_and_flush({format, "Error processing incoming message: ~p:~p:~p",
+                                           [Type, Failure, Trace]}, State),
+            {stop, {Type, Failure, Trace}, FState}
     end;
 handle_info({tcp, _Sock, _Data}, State) ->
     %% req =/= undefined: received a new request while another was in
     %% progress -> Error
     lager:debug("Received a new PB socket request"
                 " while another was in progress"),
-    send_error("Cannot send another request while one is in progress", State),
-    {stop, normal, State};
+    State1 = send_error_and_flush("Cannot send another request while one is in progress", State),
+    {stop, normal, State1};
 handle_info(StreamMessage, #state{req={Service,ReqId,StreamState}}=State) ->
     %% Handle streaming messages from other processes. This should
     %% help avoid creating extra middlemen. Naturally, this is only
@@ -147,19 +150,19 @@ handle_info(StreamMessage, #state{req={Service,ReqId,StreamState}}=State) ->
     %% be ignored.
     try
         NewState = process_stream(Service, ReqId, StreamMessage, StreamState, State),
-        {noreply, NewState}
+        {noreply, NewState, 0}
     catch
         %% Tell the client we errored before closing the connection.
         Type:Reason ->
             Trace = erlang:get_stacktrace(),
-            send_error("Error processing stream message: ~p:~p:~p",
-                       [Type, Reason, Trace], State),
-            {stop, {Type, Reason, Trace}, State}
+            FState = send_error_and_flush({format, "Error processing stream message: ~p:~p:~p",
+                                          [Type, Reason, Trace]}, State),
+            {stop, {Type, Reason, Trace}, FState}
     end;
 handle_info(Message, State) ->
     %% Throw out messages we don't care about, but log them
     lager:error("Unrecognized message ~p", [Message]),
-    {noreply, State}.
+    {noreply, State, 0}.
 
 
 %% @doc The gen_server terminate/2 callback, called when shutting down
@@ -196,16 +199,15 @@ process_message(Service, Message, ServiceState, ServerState) ->
             update_service_state(Service, NewServiceState, ServiceState, ServerState#state{req={Service,ReqId,NewServiceState}});
         %% Normal reply
         {reply, ReplyMessage, NewServiceState} ->
-            send_encoded_message_or_error(Service, ReplyMessage, ServerState),
-            update_service_state(Service, NewServiceState, ServiceState, ServerState);
+            ServerState1 = send_encoded_message_or_error(Service, ReplyMessage, ServerState),
+            update_service_state(Service, NewServiceState, ServiceState, ServerState1);
         %% Recoverable error
         {error, ErrorMessage, NewServiceState} ->
-            send_error(ErrorMessage, ServerState),
-            update_service_state(Service, NewServiceState, ServiceState, ServerState);
+            ServerState1 = send_error(ErrorMessage, ServerState),
+            update_service_state(Service, NewServiceState, ServiceState, ServerState1);
         %% Result is broken
         Other ->
-            send_error("Unknown PB service response: ~p", [Other], ServerState),
-            ServerState
+            send_error("Unknown PB service response: ~p", [Other], ServerState)
     end.
 
 %% @doc Processes a message received from a stream. These are received
@@ -221,30 +223,29 @@ process_stream(Service, ReqId, Message, ServiceState0, State) ->
             update_service_state(Service, ServiceState, ServiceState0, State);
         %% Sending multiple replies in middle-of-stream
         {reply, Replies, ServiceState} when is_list(Replies) ->
-            [ send_encoded_message_or_error(Service, Reply, State) || Reply <- Replies ],
-            update_service_state(Service, ServiceState, ServiceState0, State);
+            State1 = send_all(Service, Replies, State),
+            update_service_state(Service, ServiceState, ServiceState0, State1);
         %% Regular middle-of-stream messages
         {reply, Reply, ServiceState} ->
-            send_encoded_message_or_error(Service, Reply, State),
-            update_service_state(Service, ServiceState, ServiceState0, State);
+            State1 = send_encoded_message_or_error(Service, Reply, State),
+            update_service_state(Service, ServiceState, ServiceState0, State1);
         %% Stop the stream with multiple final replies
         {done, Replies, ServiceState} when is_list(Replies) ->
-            [ send_encoded_message_or_error(Service, Reply, State) || Reply <- Replies ],
-            update_service_state(Service, ServiceState, ServiceState0, State#state{req=undefined});
+            State1 = send_all(Service, Replies, State),
+            update_service_state(Service, ServiceState, ServiceState0, State1#state{req=undefined});
         %% Stop the stream with a final reply
         {done, Reply, ServiceState} ->
-            send_encoded_message_or_error(Service, Reply, State),
-            update_service_state(Service, ServiceState, ServiceState0, State#state{req=undefined});
+            State1 = send_encoded_message_or_error(Service, Reply, State),
+            update_service_state(Service, ServiceState, ServiceState0, State1#state{req=undefined});
         %% Stop the stream without sending a client reply
         {done, ServiceState} ->
             update_service_state(Service, ServiceState, ServiceState0, State#state{req=undefined});
         %% Send the client normal errors
         {error, Reason, ServiceState} ->
-            send_error(Reason, State),
-            update_service_state(Service, ServiceState, ServiceState0, State#state{req=undefined});
+            State1 = send_error(Reason, State),
+            update_service_state(Service, ServiceState, ServiceState0, State1#state{req=undefined});
         Other ->
-            send_error("Unknown PB service response: ~p", [Other], State),
-            State
+            send_error("Unknown PB service response: ~p", [Other], State)
     end.
 
 %% @doc Updates the given service state and puts it in the server's state.
@@ -264,7 +265,7 @@ update_service_state(Service, NewServiceState, _OldServiceState, #state{states=S
 
 %% @doc Given an unencoded response message, attempts to encode it and send it
 %% to the client.
--spec send_encoded_message_or_error(module(), term(), #state{}) -> any().
+-spec send_encoded_message_or_error(module(), term(), #state{}) -> #state{}.
 send_encoded_message_or_error(Service, ReplyMessage, ServerState) ->
     case Service:encode(ReplyMessage) of
         {ok, Encoded} ->
@@ -276,12 +277,18 @@ send_encoded_message_or_error(Service, ReplyMessage, ServerState) ->
     end.
 
 %% @doc Sends a regular message to the client
--spec send_message(binary(), #state{}) -> ok | {error, term()}.
-send_message(Bin, #state{socket=Sock}) when is_binary(Bin) orelse is_list(Bin) ->
-    gen_tcp:send(Sock, Bin).
+-spec send_message(iodata(), #state{}) -> #state{}.
+send_message(Bin, #state{buffer=Buffer}=State) when is_binary(Bin) orelse is_list(Bin) ->
+    case riak_api_pb_frame:add(Bin, Buffer) of
+        {ok, Buffer1} ->
+            State#state{buffer=Buffer1};
+        {flush, IoData, Buffer1} ->
+            flush(IoData, State#state{buffer=Buffer1})
+    end.
+
 
 %% @doc Sends an error message to the client
--spec send_error(iolist() | format(), #state{}) -> ok | {error, term()}.
+-spec send_error(iolist() | format(), #state{}) -> #state{}.
 send_error({format, Term}, State) ->
     send_error({format, "~p", [Term]}, State);
 send_error({format, Fmt, TList}, State) ->
@@ -291,11 +298,38 @@ send_error(Message, State) when is_list(Message) orelse is_binary(Message) ->
     %% extra work, it would follow the pattern. On the other hand,
     %% maybe it's too much abstraction. This is a hack, allowing us
     %% to avoid including the header file.
-    Packet = riak_pb_codec:encode({rpberrorresp, iolist_to_binary(Message), 0}),
+    Packet = riak_pb_codec:encode({rpberrorresp, Message, 0}),
     send_message(Packet, State).
 
 %% @doc Formats the terms with the given string and then sends an
 %% error message to the client.
--spec send_error(io:format(), list(), #state{}) -> ok | {error, term()}.
+-spec send_error(io:format(), list(), #state{}) -> #state{}.
 send_error(Format, Terms, State) ->
     send_error(io_lib:format(Format, Terms), State).
+
+%% @doc Sends multiple messages at once.
+-spec send_all(module(), [term()], #state{}) -> #state{}.
+send_all(_Service, [], State) ->
+    State;
+send_all(Service, [Reply|Rest], State) ->
+    send_all(Service, Rest, send_encoded_message_or_error(Service, Reply, State)).
+
+%% @doc Flushes all buffered replies to the socket.
+-spec flush(iodata(), #state{}) -> #state{}.
+flush([], State) ->
+    %% The buffer was empty, so do a no-op.
+    State;
+flush(IoData, #state{socket=Sock}=State) ->
+    %% Since we do our own framing, don't send a length header
+    inet:setopts(Sock, [{packet, raw}]),
+    gen_tcp:send(Sock, IoData),
+    %% We want to receive messages with 4-byte headers, so set it back
+    inet:setopts(Sock, [{packet, 4}]),
+    State.
+
+%% @doc Sends an error and immediately flushes the message buffer.
+-spec send_error_and_flush(iolist() | format(), #state{}) -> #state{}.
+send_error_and_flush(Error, State) ->
+    State1 = send_error(Error, State),
+    {ok, Data, NewBuffer} = riak_api_pb_frame:flush(State1#state.buffer),
+    flush(Data, State1#state{buffer=NewBuffer}).

@@ -45,7 +45,7 @@ init([PortNum]) ->
 -spec sock_opts() -> [gen_tcp:option()].
 sock_opts() ->
     BackLog = app_helper:get_env(riak_api, pb_backlog, 5),
-    NoDelay = app_helper:get_env(riak_api, disable_pb_nagle, true),
+    NoDelay = app_helper:get_env(riak_api, disable_pb_nagle, false),
     [binary, {packet, 4}, {reuseaddr, true}, {backlog, BackLog}, {nodelay, NoDelay}].
 
 %% @doc The handle_call/3 gen_nb_server callback. Unused.

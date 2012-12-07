@@ -22,7 +22,8 @@
 -module(riak_api_pb_frame).
 
 -export([new/0,
-         add/2]).
+         add/2,
+         flush/1]).
 
 -record(buffer, {
           buffer = [] :: iodata(),
@@ -39,6 +40,7 @@ new() ->
 
 -spec add(iodata(), buffer()) -> {ok, buffer()} | {flush, iodata(), buffer()}.
 add(Message, #buffer{buffer = Buffer, size = Size, max_size = Max}) ->
+    %% 'Message' should already have the message code prefix on it.
     MessageSize = iolist_size(Message),
     NewSize = MessageSize + 4 + Size,
     NewBuffer = [[<<MessageSize:32/unsigned-big-integer>>,Message]|Buffer],
@@ -48,3 +50,9 @@ add(Message, #buffer{buffer = Buffer, size = Size, max_size = Max}) ->
         true -> 
             {ok, #buffer{buffer=NewBuffer, size=NewSize}}
     end.
+
+-spec flush(buffer()) -> {ok, iodata(), buffer()}.
+flush(#buffer{buffer=[]}=Frame) ->
+    {ok, [], Frame};
+flush(#buffer{buffer=IoData}) ->
+    {ok, lists:reverse(IoData), #buffer{}}.
