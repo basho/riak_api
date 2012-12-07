@@ -79,7 +79,7 @@ handle_call({set_socket, Socket}, _From, State) ->
     {reply, ok, State#state{socket = Socket}}.
 
 %% @doc The handle_cast/2 gen_server callback.
--spec handle_cast(Message::term(), State::#state{}) -> {noreply, NewState::#state{}}.
+-spec handle_cast(Message::term(), State::#state{}) -> {noreply, NewState::#state{}, timeout()}.
 handle_cast({registered, Service}, #state{states=ServiceStates}=State) ->
     %% When a new service is registered after a client connection is
     %% already established, update the internal state to support the
