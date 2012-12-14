@@ -112,7 +112,7 @@ handle_info({tcp, _Sock, Bin}, State=#state{req=undefined,
     %% Because we do our own outbound framing, we need to do our own
     %% inbound deframing.
     NewBuffer = <<InBuffer/binary, Bin/binary>>,
-    decode_buffer(NewBuffer, State);
+    decode_buffer(State#state{inbuffer=NewBuffer});
 handle_info({tcp, _Sock, _Data}, State) ->
     %% req =/= undefined: received a new request while another was in
     %% progress -> Error
@@ -165,12 +165,13 @@ code_change(_OldVsn,State,_Extra) ->
 %% Internal functions
 %% ===================================================================
 
-decode_buffer(Buffer, State=#state{socket=Socket}) ->
+decode_buffer(State=#state{socket=Socket,
+                           inbuffer=Buffer}) ->
     case erlang:decode_packet(4, Buffer, []) of
         {ok, <<MsgCode:8, MsgData/binary>>, Rest} ->
-            case handle_message(MsgCode, MsgData, State#state{inbuffer=Rest}) of
+            case handle_message(MsgCode, MsgData, State) of
                 {ok, NewState} ->
-                    decode_buffer(Rest, NewState);
+                    decode_buffer(NewState#state{inbuffer=Rest});
                 Stop ->
                     Stop
             end;
@@ -179,7 +180,7 @@ decode_buffer(Buffer, State=#state{socket=Socket}) ->
             {stop, badmessage, State};
         {more, _Length} ->
             inet:setopts(Socket, [{active, once}]),
-            {noreply, State#state{inbuffer=Buffer}, 0};
+            {noreply, State, 0};
         {error, Reason} ->
             FState = send_error_and_flush({format, "Invalid message packet, reason: ~p", [Reason]},
                                           State#state{inbuffer= <<>>}),
