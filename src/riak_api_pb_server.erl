@@ -107,28 +107,12 @@ handle_info({tcp_closed, Socket}, State=#state{socket=Socket}) ->
     {stop, normal, State};
 handle_info({tcp_error, Socket, _Reason}, State=#state{socket=Socket}) ->
     {stop, normal, State};
-handle_info({tcp, _Sock, Bin}, State=#state{socket=Socket,
-                                            req=undefined,
+handle_info({tcp, _Sock, Bin}, State=#state{req=undefined,
                                             inbuffer=InBuffer}) ->
     %% Because we do our own outbound framing, we need to do our own
     %% inbound deframing.
     NewBuffer = <<InBuffer/binary, Bin/binary>>,
-    case erlang:decode_packet(4, NewBuffer, []) of
-        {ok, <<MsgCode:8, MsgData/binary>>, Rest} ->
-            handle_packet(MsgCode, MsgData, State#state{inbuffer=Rest});
-        {ok, Binary, Rest} ->
-            lager:error("Unexpected message format! Message: ~p, Rest: ~p", [Binary, Rest]),
-            {stop, badmessage, State};
-        {more, Length} ->
-            lager:debug("Buffered incoming message, expecting ~p, got ~p",
-                        [Length, byte_size(NewBuffer)]),
-            inet:setopts(Socket, [{active, once}]),
-            {noreply, State#state{inbuffer=NewBuffer}, 0};
-        {error, Reason} ->
-            FState = send_error_and_flush({format, "Invalid message packet, reason: ~p", [Reason]},
-                                          State#state{inbuffer= <<>>}),
-            {noreply, FState, 0}
-    end;
+    decode_buffer(NewBuffer, State);
 handle_info({tcp, _Sock, _Data}, State) ->
     %% req =/= undefined: received a new request while another was in
     %% progress -> Error
@@ -181,8 +165,28 @@ code_change(_OldVsn,State,_Extra) ->
 %% Internal functions
 %% ===================================================================
 
-handle_packet(MsgCode, MsgData, State=#state{states=ServiceStates,
-                                             socket=Socket}) ->
+decode_buffer(Buffer, State=#state{socket=Socket}) ->
+    case erlang:decode_packet(4, Buffer, []) of
+        {ok, <<MsgCode:8, MsgData/binary>>, Rest} ->
+            case handle_message(MsgCode, MsgData, State#state{inbuffer=Rest}) of
+                {ok, NewState} ->
+                    decode_buffer(Rest, NewState);
+                Stop ->
+                    Stop
+            end;
+        {ok, Binary, Rest} ->
+            lager:error("Unexpected message format! Message: ~p, Rest: ~p", [Binary, Rest]),
+            {stop, badmessage, State};
+        {more, _Length} ->
+            inet:setopts(Socket, [{active, once}]),
+            {noreply, State#state{inbuffer=Buffer}, 0};
+        {error, Reason} ->
+            FState = send_error_and_flush({format, "Invalid message packet, reason: ~p", [Reason]},
+                                          State#state{inbuffer= <<>>}),
+            {noreply, FState, 0}
+    end.
+
+handle_message(MsgCode, MsgData, State=#state{states=ServiceStates}) ->
     try
         %% First find the appropriate service module to dispatch
         NewState = case riak_api_pb_registrar:lookup(MsgCode) of
@@ -199,8 +203,7 @@ handle_packet(MsgCode, MsgData, State=#state{states=ServiceStates,
             error ->
                 send_error("Unknown message code.", State)
         end,
-        inet:setopts(Socket, [{active, once}]),
-        {noreply, NewState, 0}
+        {ok, NewState}
     catch
         %% Tell the client we errored before closing the connection.
         Type:Failure ->
