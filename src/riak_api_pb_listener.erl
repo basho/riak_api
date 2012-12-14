@@ -45,8 +45,8 @@ init([PortNum]) ->
 -spec sock_opts() -> [gen_tcp:option()].
 sock_opts() ->
     BackLog = app_helper:get_env(riak_api, pb_backlog, 5),
-    NoDelay = app_helper:get_env(riak_api, disable_pb_nagle, true),
-    [binary, {packet, 4}, {reuseaddr, true}, {backlog, BackLog}, {nodelay, NoDelay}].
+    NoDelay = app_helper:get_env(riak_api, disable_pb_nagle, false),
+    [binary, {packet, raw}, {reuseaddr, true}, {backlog, BackLog}, {nodelay, NoDelay}].
 
 %% @doc The handle_call/3 gen_nb_server callback. Unused.
 -spec handle_call(term(), pid(), #state{}) -> {reply, term(), #state{}}.
@@ -81,7 +81,7 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 
 %% @doc The connection initiation callback for gen_nb_server, called
 %% when a new socket is accepted.
--spec new_connection(gen_tcp:socket(), #state{}) -> {ok, #state{}}.
+-spec new_connection(port(), #state{}) -> {ok, #state{}}.
 new_connection(Socket, State) ->
     {ok, Pid} = riak_api_pb_sup:start_socket(),
     ok = gen_tcp:controlling_process(Socket, Pid),
@@ -100,7 +100,7 @@ get_port() ->
                           " deprecated and will be removed.  Use"
                           " riak_api/pb_port in the future."),
             Port;
-        {default, undefined} ->
+        _ ->
             lager:warning("The config riak_api/pb_port is missing,"
                           " PB connections will be disabled."),
             undefined
@@ -118,7 +118,7 @@ get_ip() ->
                           " deprecated and will be removed.  Use"
                           " riak_api/pb_ip in the future."),
             IP;
-        {default, undefined} ->
+        _ ->
             lager:warning("The config riak_api/pb_ip is missing,"
                           " PB connections will be disabled."),
             undefined
