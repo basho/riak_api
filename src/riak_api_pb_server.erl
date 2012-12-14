@@ -41,7 +41,8 @@
           socket :: port(),   % socket
           req,                % current request
           states :: orddict:orddict(),    % per-service connection state
-          buffer = riak_api_pb_frame:new() :: riak_api_pb_frame:buffer() % frame buffer which we can use to optimize TCP sends
+          inbuffer = <<>>, % when an incomplete message comes in, we have to unpack it ourselves
+          outbuffer = riak_api_pb_frame:new() :: riak_api_pb_frame:buffer() % frame buffer which we can use to optimize TCP sends
          }).
 
 -type format() :: {format, term()} | {format, io:format(), [term()]}.
@@ -75,7 +76,7 @@ init([]) ->
 %% @doc The handle_call/3 gen_server callback.
 -spec handle_call(Message::term(), From::{pid(),term()}, State::#state{}) -> {reply, Message::term(), NewState::#state{}}.
 handle_call({set_socket, Socket}, _From, State) ->
-    inet:setopts(Socket, [{active, once}, {header, 1}]),
+    inet:setopts(Socket, [{active, once}]),
     {reply, ok, State#state{socket = Socket}}.
 
 %% @doc The handle_cast/2 gen_server callback.
@@ -98,43 +99,35 @@ handle_cast(_Msg, State) ->
 
 %% @doc The handle_info/2 gen_server callback.
 -spec handle_info(Message::term(), State::#state{}) -> {noreply, NewState::#state{}} | {stop, Reason::atom(), NewState::#state{}}.
-handle_info(timeout, #state{buffer=Buffer}=State) ->
+handle_info(timeout, #state{outbuffer=Buffer}=State) ->
     %% Flush any protocol messages that have been buffering
     {ok, Data, NewBuffer} = riak_api_pb_frame:flush(Buffer),
-    {noreply, flush(Data, State#state{buffer=NewBuffer})};
+    {noreply, flush(Data, State#state{outbuffer=NewBuffer})};
 handle_info({tcp_closed, Socket}, State=#state{socket=Socket}) ->
     {stop, normal, State};
 handle_info({tcp_error, Socket, _Reason}, State=#state{socket=Socket}) ->
     {stop, normal, State};
-handle_info({tcp, _Sock, [MsgCode|MsgData]}, State=#state{
-                                               socket=Socket,
-                                               req=undefined,
-                                               states=ServiceStates}) ->
-    try
-        %% First find the appropriate service module to dispatch
-        NewState = case riak_api_pb_registrar:lookup(MsgCode) of
-            {ok, Service} ->
-                %% Decode the message according to the service
-                case Service:decode(MsgCode, MsgData) of
-                    {ok, Message} ->
-                        %% Process the message
-                        ServiceState = orddict:fetch(Service, ServiceStates),
-                        process_message(Service, Message, ServiceState, State);
-                    {error, Reason} ->
-                        send_error("Message decoding error: ~p", [Reason], State)
-                end;
-            error ->
-                send_error("Unknown message code.", State)
-        end,
-        inet:setopts(Socket, [{active, once}]),
-        {noreply, NewState, 0}
-    catch
-        %% Tell the client we errored before closing the connection.
-        Type:Failure ->
-            Trace = erlang:get_stacktrace(),
-            FState = send_error_and_flush({format, "Error processing incoming message: ~p:~p:~p",
-                                           [Type, Failure, Trace]}, State),
-            {stop, {Type, Failure, Trace}, FState}
+handle_info({tcp, _Sock, Bin}, State=#state{socket=Socket,
+                                            req=undefined,
+                                            inbuffer=InBuffer}) ->
+    %% Because we do our own outbound framing, we need to do our own
+    %% inbound deframing.
+    NewBuffer = <<InBuffer/binary, Bin/binary>>,
+    case erlang:decode_packet(4, NewBuffer, []) of
+        {ok, <<MsgCode:8, MsgData/binary>>, Rest} ->
+            handle_packet(MsgCode, MsgData, State#state{inbuffer=Rest});
+        {ok, Binary, Rest} ->
+            lager:error("Unexpected message format! Message: ~p, Rest: ~p", [Binary, Rest]),
+            {stop, badmessage, State};
+        {more, Length} ->
+            lager:debug("Buffered incoming message, expecting ~p, got ~p",
+                        [Length, byte_size(NewBuffer)]),
+            inet:setopts(Socket, [{active, once}]),
+            {noreply, State#state{inbuffer=NewBuffer}, 0};
+        {error, Reason} ->
+            FState = send_error_and_flush({format, "Invalid message packet, reason: ~p", [Reason]},
+                                          State#state{inbuffer= <<>>}),
+            {noreply, FState, 0}
     end;
 handle_info({tcp, _Sock, _Data}, State) ->
     %% req =/= undefined: received a new request while another was in
@@ -187,6 +180,36 @@ code_change(_OldVsn,State,_Extra) ->
 %% ===================================================================
 %% Internal functions
 %% ===================================================================
+
+handle_packet(MsgCode, MsgData, State=#state{states=ServiceStates,
+                                             socket=Socket}) ->
+    try
+        %% First find the appropriate service module to dispatch
+        NewState = case riak_api_pb_registrar:lookup(MsgCode) of
+            {ok, Service} ->
+                %% Decode the message according to the service
+                case Service:decode(MsgCode, MsgData) of
+                    {ok, Message} ->
+                        %% Process the message
+                        ServiceState = orddict:fetch(Service, ServiceStates),
+                        process_message(Service, Message, ServiceState, State);
+                    {error, Reason} ->
+                        send_error("Message decoding error: ~p", [Reason], State)
+                end;
+            error ->
+                send_error("Unknown message code.", State)
+        end,
+        inet:setopts(Socket, [{active, once}]),
+        {noreply, NewState, 0}
+    catch
+        %% Tell the client we errored before closing the connection.
+        Type:Failure ->
+            Trace = erlang:get_stacktrace(),
+            FState = send_error_and_flush({format, "Error processing incoming message: ~p:~p:~p",
+                                           [Type, Failure, Trace]}, State),
+            {stop, {Type, Failure, Trace}, FState}
+    end.
+
 
 %% @doc Dispatches an incoming message to the registered service that
 %% recognizes it. This is called after the message has been identified
@@ -278,12 +301,12 @@ send_encoded_message_or_error(Service, ReplyMessage, ServerState) ->
 
 %% @doc Sends a regular message to the client
 -spec send_message(iodata(), #state{}) -> #state{}.
-send_message(Bin, #state{buffer=Buffer}=State) when is_binary(Bin) orelse is_list(Bin) ->
+send_message(Bin, #state{outbuffer=Buffer}=State) when is_binary(Bin) orelse is_list(Bin) ->
     case riak_api_pb_frame:add(Bin, Buffer) of
         {ok, Buffer1} ->
-            State#state{buffer=Buffer1};
+            State#state{outbuffer=Buffer1};
         {flush, IoData, Buffer1} ->
-            flush(IoData, State#state{buffer=Buffer1})
+            flush(IoData, State#state{outbuffer=Buffer1})
     end.
 
 
@@ -320,16 +343,12 @@ flush([], State) ->
     %% The buffer was empty, so do a no-op.
     State;
 flush(IoData, #state{socket=Sock}=State) ->
-    %% Since we do our own framing, don't send a length header
-    inet:setopts(Sock, [{packet, raw}]),
     gen_tcp:send(Sock, IoData),
-    %% We want to receive messages with 4-byte headers, so set it back
-    inet:setopts(Sock, [{packet, 4}]),
     State.
 
 %% @doc Sends an error and immediately flushes the message buffer.
 -spec send_error_and_flush(iolist() | format(), #state{}) -> #state{}.
 send_error_and_flush(Error, State) ->
     State1 = send_error(Error, State),
-    {ok, Data, NewBuffer} = riak_api_pb_frame:flush(State1#state.buffer),
-    flush(Data, State1#state{buffer=NewBuffer}).
+    {ok, Data, NewBuffer} = riak_api_pb_frame:flush(State1#state.outbuffer),
+    flush(Data, State1#state{outbuffer=NewBuffer}).

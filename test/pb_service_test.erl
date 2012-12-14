@@ -12,12 +12,13 @@
          process/2,
          process_stream/3]).
 
--define(MSGMIN, 101).
+-define(MSGMIN, 99).
 -define(MSGMAX, 109).
 
 init() ->
     undefined.
-
+decode(99, _) ->
+    {ok, bigreq};
 decode(101, <<>>) ->
     {ok, dummyreq};
 decode(103, <<>>) ->
@@ -42,6 +43,8 @@ encode(ok) ->
 encode(_) ->
     error.
 
+process(bigreq, State) ->
+    {reply, foo, State};
 process(stream, State) ->
     Server = self(),
     Ref = make_ref(),
@@ -114,19 +117,25 @@ cleanup({H, P, Deps}) ->
     ok.
 
 request(Code, Payload) when is_binary(Payload), is_integer(Code) ->
-    {ok, Socket} = new_connection(),
+    Connection = new_connection(),
+    ?assertMatch({ok, _}, Connection),
+    {ok, Socket} = Connection,
     request(Code, Payload, Socket).
 
 request(Code, Payload, Socket) when is_binary(Payload), is_integer(Code) ->
-    ok = gen_tcp:send(Socket, <<Code:8, Payload/binary>>),
-    {ok, Response} = gen_tcp:recv(Socket, 0),
+    ?assertEqual(ok, gen_tcp:send(Socket, <<Code:8, Payload/binary>>)),
+    Result = gen_tcp:recv(Socket, 0),
+    ?assertMatch({ok, _}, Result),
+    {ok, Response} = Result,
     Response.
 
 request_stream(Code, Payload, DonePredicate) when is_binary(Payload),
                                                   is_integer(Code),
                                                   is_function(DonePredicate) ->
-    {ok, Socket} = new_connection(),
-    ok = gen_tcp:send(Socket, <<Code:8, Payload/binary>>),
+    Connection = new_connection(),
+    ?assertMatch({ok, _}, Connection),
+    {ok, Socket} = Connection,
+    ?assertEqual(ok, gen_tcp:send(Socket, <<Code:8, Payload/binary>>)),
     stream_loop([], gen_tcp:recv(Socket, 0), Socket, DonePredicate).
 
 stream_loop(Acc0, {ok, [Code|Bin]=Packet}, Socket, Predicate) ->
@@ -164,7 +173,9 @@ simple_test_() ->
       %% Unencodable response message
       ?_assertMatch([0|Bin] when is_binary(Bin), request(103, <<>>)),
       %% Internal service error
-      ?_assertMatch([0|Bin] when is_binary(Bin), request(106, <<>>))
+      ?_assertMatch([0|Bin] when is_binary(Bin), request(106, <<>>)),
+      %% Send a message that spans multiple TCP packets
+      ?_assertMatch([108|<<"foo">>], request(99, binary:copy(<<"BIGDATA">>, 1024)))
      ]}.
 
 late_registration_test_() ->
