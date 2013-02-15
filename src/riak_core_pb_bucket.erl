@@ -52,10 +52,8 @@
 
 -include_lib("riak_pb/include/riak_pb.hrl").
 
--record(state, {client}).
-
 init() ->
-    #state{client = riak:local_client()}.
+    undefined.
 
 %% @doc decode/2 callback. Decodes an incoming message.
 decode(Code, Bin) when Code == 19; Code == 21 ->
@@ -66,17 +64,15 @@ encode(Message) ->
     {ok, riak_pb_codec:encode(Message)}.
 
 %% Get bucket properties
-process(#rpbgetbucketreq{bucket=B},
-        #state{client=C} = State) ->
-    Props = C:get_bucket(B),
+process(#rpbgetbucketreq{bucket=B}, State) ->
+    Props = riak_core_bucket:get_bucket(B),
     PbProps = riak_pb_codec:encode_bucket_props(Props),
     {reply, #rpbgetbucketresp{props = PbProps}, State};
 
 %% Set bucket properties
-process(#rpbsetbucketreq{bucket=B, props = PbProps},
-        #state{client=C} = State) ->
+process(#rpbsetbucketreq{bucket=B, props = PbProps}, State) ->
     Props = riak_pb_codec:decode_bucket_props(PbProps),
-    case C:set_bucket(B, Props) of
+    case riak_core_bucket:set_bucket(B, Props) of
         ok ->
             {reply, rpbsetbucketresp, State};
         {error, Details} ->
