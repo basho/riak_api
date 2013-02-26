@@ -97,23 +97,20 @@ setup() ->
 
     application:set_env(riak_core, handoff_port, 0),
 
-    OldHost = app_helper:get_env(riak_api, pb_ip, "127.0.0.1"),
-    OldPort = app_helper:get_env(riak_api, pb_port, 8087),
-    application:set_env(riak_api, pb_ip, "127.0.0.1"),
-    application:set_env(riak_api, pb_port, 32767),
+    OldListeners = app_helper:get_env(riak_api, pb, [{"127.0.0.1", 8087}]),
+    application:set_env(riak_api, pb, [{"127.0.0.1", 32767}]),
 
     [ application:start(A) || A <- Deps ],
     riak_core:wait_for_application(riak_api),
     wait_for_port(),
     riak_api_pb_service:register(?MODULE, ?MSGMIN, ?MSGMAX),
     riak_api_pb_service:register(?MODULE, 111),
-    {OldHost, OldPort, Deps}.
+    {OldListeners, Deps}.
 
-cleanup({H, P, Deps}) ->
+cleanup({L, Deps}) ->
     [ application:stop(A) || A <- lists:reverse(Deps), not is_otp_base_app(A) ],
     wait_for_application_shutdown(riak_api),
-    application:set_env(riak_api, pb_ip, H),
-    application:set_env(riak_api, pb_port, P),
+    application:set_env(riak_api, pb, L),
     ok.
 
 request_multi(Payloads) when is_list(Payloads) ->
@@ -169,8 +166,7 @@ new_connection() ->
     new_connection([{packet,4}, {header, 1}]).
 
 new_connection(Options) ->
-    Host = app_helper:get_env(riak_api, pb_ip),
-    Port = app_helper:get_env(riak_api, pb_port),
+    {Host, Port} = hd(app_helper:get_env(riak_api, pb)),
     gen_tcp:connect(Host, Port, [binary, {active, false},{nodelay, true}|Options]).
 
 simple_test_() ->
