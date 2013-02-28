@@ -57,12 +57,10 @@ init() ->
     undefined.
 
 %% @doc decode/2 callback. Decodes an incoming message.
-%% @todo Factor this out of riakc_pb to remove the dependency.
 decode(Code, Bin) when Code == 1; Code == 7 ->
     {ok, riak_pb_codec:decode(Code, Bin)}.
 
 %% @doc encode/1 callback. Encodes an outgoing response message.
-%% @todo Factor this out of riakc_pb to remove the dependency.
 encode(Message) ->
     {ok, riak_pb_codec:encode(Message)}.
 
@@ -70,8 +68,7 @@ encode(Message) ->
 process(rpbpingreq, State) ->
     {reply, rpbpingresp, State};
 process(rpbgetserverinforeq, State) ->
-    %% TODO: Think of a better way to present the server version
-    {ok, Vsn} = application:get_key(riak_kv, vsn),
+    {_, Vsn} = init:script_id(),
     Message = #rpbgetserverinforesp{node = riak_pb_codec:to_binary(node()),
                                     server_version = riak_pb_codec:to_binary(Vsn)},
     {reply, Message, State}.
