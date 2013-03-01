@@ -28,7 +28,7 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 -export([sock_opts/0, new_connection/2]).
--export([get_port/0, get_ip/0]).
+-export([get_listeners/0]).
 -record(state, {portnum}).
 
 %% @doc Starts the PB listener
@@ -88,38 +88,80 @@ new_connection(Socket, State) ->
     ok = riak_api_pb_server:set_socket(Pid, Socket),
     {ok, State}.
 
+get_listeners() ->
+    DefaultListener = case {get_ip(), get_port()} of
+                          {undefined, _} -> [];
+                          {_, undefined} -> [];
+                          {IP, Port} -> [{IP, Port}]
+                      end,
+    Listeners = app_helper:get_env(riak_api, pb, []) ++ DefaultListener,
+    [ {I, P} || {I, P} <- Listeners ].
+
 %% @private
 get_port() ->
-    Envs = [{riak_api, pb_port},
-            {riak_kv, pb_port}],
-    case app_helper:try_envs(Envs) of
-        {riak_api, pb_port, Port} ->
-            Port;
-        {riak_kv, pb_port, Port} ->
-            lager:warning("The config riak_kv/pb_port has been"
-                          " deprecated and will be removed.  Use"
-                          " riak_api/pb_port in the future."),
-            Port;
-        _ ->
-            lager:warning("The config riak_api/pb_port is missing,"
-                          " PB connections will be disabled."),
-            undefined
+    case app_helper:get_env(riak_api, pb_port) of
+        undefined ->
+            undefined;
+        Port ->
+            lager:warning("The config riak_api/pb_port has been"
+                          " deprecated and will be removed. Use"
+                          " riak_api/pb (IP/Port pairs) in the future."),
+            Port
     end.
 
 %% @private
 get_ip() ->
-    Envs = [{riak_api, pb_ip},
-            {riak_kv, pb_ip}],
-    case app_helper:try_envs(Envs) of
-        {riak_api, pb_ip, IP} ->
-            IP;
-        {riak_kv, pb_ip, IP} ->
-            lager:warning("The config riak_kv/pb_ip has been"
-                          " deprecated and will be removed.  Use"
-                          " riak_api/pb_ip in the future."),
-            IP;
-        _ ->
-            lager:warning("The config riak_api/pb_ip is missing,"
-                          " PB connections will be disabled."),
-            undefined
+    case app_helper:get_env(riak_api, pb_ip) of
+        undefined ->
+            undefined;
+        IP ->
+            lager:warning("The config riak_api/pb_ip has been"
+                          " deprecated and will be removed. Use"
+                          " riak_api/pb (IP/Port pairs) in the future."),
+            IP
     end.
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-compile(export_all).
+
+listeners_test_() ->
+    {foreach,
+     fun() ->
+             application:load(riak_api),
+             app_helper:get_env(riak_api, pb, [{"127.0.0.1", 8087}])
+     end,
+     fun(OldListeners) ->
+             application:set_env(riak_api, pb, OldListeners),
+             application:unset_env(riak_api, pb_ip),
+             application:unset_env(riak_api, pb_port)
+     end,
+     [
+      {"old config keys get upgraded",
+       fun() ->
+               application:unset_env(riak_api, pb),
+               application:set_env(riak_api, pb_ip, "127.0.0.1"),
+               application:set_env(riak_api, pb_port, 10887),
+               ?assertEqual([{"127.0.0.1", 10887}], get_listeners())
+       end},
+      {"missing old IP config key disables listener",
+       fun() ->
+               application:unset_env(riak_api, pb),
+               %% application:set_env(riak_api, pb_ip, "127.0.0.1"),
+               application:set_env(riak_api, pb_port, 10887),
+               ?assertEqual([], get_listeners())
+       end},
+      {"missing old Port config key disables listener",
+       fun() ->
+               application:unset_env(riak_api, pb),
+               application:set_env(riak_api, pb_ip, "127.0.0.1"),
+               %% application:set_env(riak_api, pb_port, 10887),
+               ?assertEqual([], get_listeners())
+       end},
+      {"bad configs are ignored",
+       fun() ->
+              application:set_env(riak_api, pb, [{"0.0.0.0", 8087}, badjuju]),
+               ?assertEqual([{"0.0.0.0", 8087}], get_listeners())
+       end}]}.
+
+-endif.
