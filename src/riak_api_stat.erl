@@ -115,4 +115,9 @@ register_stat(Name, {function, _Module, _Function}=Fun) ->
     folsom_metrics:notify({Name, Fun}).
 
 active_pb_connects() ->
-    proplists:get_value(active, supervisor:count_children(riak_api_pb_sup)).
+    %% riak_api_pb_sup will not be running when there are no listeners
+    %% defined.
+    case erlang:whereis(riak_api_pb_sup) of
+        undefined -> 0;
+        _ -> proplists:get_value(active, supervisor:count_children(riak_api_pb_sup))
+    end.
