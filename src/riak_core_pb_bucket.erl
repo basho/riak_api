@@ -36,7 +36,7 @@
 %% <pre>
 %% 20 - RpbGetBucketResp
 %% 22 - RpbSetBucketResp
-%% 30 - RpbResetBucketReq
+%% 30 - RpbResetBucketResp
 %% </pre>
 %%
 %% @end
