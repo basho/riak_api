@@ -31,7 +31,8 @@
                    {riak_api_basic_pb_service, 7, 8},
                    %% Note: Riak core cannot register this itself,
                    %% because it is started before riak_api.
-                   {riak_core_pb_bucket, 19, 22}
+                   {riak_core_pb_bucket, 19, 22},
+                   {riak_core_pb_bucket, 29, 30}
                   ]).
 
 %% @doc The application:start callback.

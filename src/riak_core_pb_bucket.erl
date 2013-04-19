@@ -28,6 +28,7 @@
 %% <pre>
 %% 19 - RpbGetBucketReq
 %% 21 - RpbSetBucketReq
+%% 29 - RpbResetBucketReq
 %% </pre>
 %%
 %% <p>This service produces the following responses:</p>
@@ -35,10 +36,9 @@
 %% <pre>
 %% 20 - RpbGetBucketResp
 %% 22 - RpbSetBucketResp
+%% 30 - RpbResetBucketResp
 %% </pre>
 %%
-%% <p>The semantics are unchanged from their original
-%% implementations.</p>
 %% @end
 -module(riak_core_pb_bucket).
 
@@ -56,7 +56,7 @@ init() ->
     undefined.
 
 %% @doc decode/2 callback. Decodes an incoming message.
-decode(Code, Bin) when Code == 19; Code == 21 ->
+decode(Code, Bin) when Code == 19; Code == 21; Code == 29 ->
     {ok, riak_pb_codec:decode(Code, Bin)}.
 
 %% @doc encode/1 callback. Encodes an outgoing response message.
@@ -77,7 +77,12 @@ process(#rpbsetbucketreq{bucket=B, props = PbProps}, State) ->
             {reply, rpbsetbucketresp, State};
         {error, Details} ->
             {error, {format, "Invalid bucket properties: ~p", [Details]}, State}
-    end.
+    end;
+
+%% Reset bucket properties
+process(#rpbresetbucketreq{bucket=B}, State) ->
+    riak_core_bucket:reset_bucket(B),
+    {reply, rpbresetbucketresp, State}.
 
 process_stream(_, _, State) ->
     {ignore, State}.
