@@ -30,12 +30,17 @@
 -include_lib("eunit/include/eunit.hrl").
 -endif.
 
--behaviour(gen_server).
+-behaviour(gen_fsm).
 
+%% API
 -export([start_link/0, set_socket/2]).
 
--export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-         terminate/2, code_change/3]).
+%% States
+-export([wait_for_socket/2, wait_for_socket/3, wait_for_tls/2, wait_for_tls/3,
+         wait_for_auth/2, wait_for_auth/3, connected/2, connected/3]).
+
+-export([init/1, handle_event/3, handle_sync_event/3, handle_info/3,
+         terminate/3 code_change/4]).
 
 -record(state, {
           socket :: port(),   % socket
@@ -55,12 +60,12 @@
 %% @doc Starts a PB server, ready to service a single socket.
 -spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
-    gen_server:start_link(?MODULE, [], []).
+    gen_fsm:start_link(?MODULE, [], []).
 
 %% @doc Sets the socket to service for this server.
 -spec set_socket(pid(), port()) -> ok.
 set_socket(Pid, Socket) ->
-    gen_server:call(Pid, {set_socket, Socket}, infinity).
+    gen_fsm:sync_send_event(Pid, {set_socket, Socket}, infinity).
 
 %% @doc The gen_server init/1 callback, initializes the
 %% riak_api_pb_server.
@@ -70,18 +75,51 @@ init([]) ->
     ServiceStates = lists:foldl(fun(Service, States) ->
                                         orddict:store(Service, Service:init(), States)
                                 end,
-                                orddict:new(), riak_api_pb_registrar:services()),
-    {ok, #state{states=ServiceStates}}.
+                                orddict:new(),
+                                riak_api_pb_registrar:services()),
+    {ok, wait_for_socket, #state{states=ServiceStates}}.
 
-%% @doc The handle_call/3 gen_server callback.
--spec handle_call(Message::term(), From::{pid(),term()}, State::#state{}) -> {reply, Message::term(), NewState::#state{}}.
-handle_call({set_socket, Socket}, _From, State) ->
+wait_for_socket(_Event, State) ->
+    {next_state, wait_for_socket, State}.
+
+wait_for_socket({set_socket, Socket}, _From, State) ->
     inet:setopts(Socket, [{active, once}]),
-    {reply, ok, State#state{socket = Socket}}.
+    %% check if security is enabled, if it is wait for TLS, otherwise go
+    %% straight into connected state
+    case app_helper:get_env(riak_core, security, false) of
+        true ->
+            {reply, ok, wait_for_tls, State#state{socket=Socket}};
+        false ->
+            {reply, ok, connected, State#state{socket=Socket}}
+    end;
+wait_for_socket(_Event, _From, State) ->
+    {reply, unknown_message, wait_for_socket, State}.
+
+wait_for_tls(_Event, State) ->
+    {next_state, wait_for_tls, State}.
+
+wait_for_tls(Event, _From, State) ->
+    {reply, unknown_message, wait_for_tls, State}.
+
+wait_for_auth(_Event, State) ->
+    {next_state, wait_for_auth, State}.
+
+wait_for_auth(_Event, _From, State) ->
+    {reply, unknown_message, wait_for_auth, State}.
+
+connected(timeout, State=#state{outbuffer=Buffer}) ->
+    %% Flush any protocol messages that have been buffering
+    {ok, Data, NewBuffer} = riak_api_pb_frame:flush(Buffer),
+    {next_state, connected, flush(Data, State#state{outbuffer=NewBuffer})};
+connected(_Event, State) ->
+    {next_state, connected, State}.
+
+connected(_Event, _From, State) ->
+    {reply, unknown_message, connected, State}.
 
 %% @doc The handle_cast/2 gen_server callback.
 -spec handle_cast(Message::term(), State::#state{}) -> {noreply, NewState::#state{}, timeout()}.
-handle_cast({registered, Service}, #state{states=ServiceStates}=State) ->
+handle_event({registered, Service}, StateName, #state{states=ServiceStates}=State) ->
     %% When a new service is registered after a client connection is
     %% already established, update the internal state to support the
     %% new capabilities.
@@ -89,31 +127,37 @@ handle_cast({registered, Service}, #state{states=ServiceStates}=State) ->
         true ->
             %% This is an existing service registering
             %% disjoint message codes
-            {noreply, State, 0};
+            {next_state, StateName, State, 0};
         false ->
             %% This is a new service registering
-            {noreply, State#state{states=orddict:store(Service, Service:init(), ServiceStates)}, 0}
+            {next_state, StateName,
+             State#state{states=orddict:store(Service, Service:init(),
+                                              ServiceStates)}, 0}
     end;
-handle_cast(_Msg, State) ->
-    {noreply, State, 0}.
+handle_event(_Msg, StateName, State) ->
+    {next_state, StateName, State, 0}.
 
 %% @doc The handle_info/2 gen_server callback.
 -spec handle_info(Message::term(), State::#state{}) -> {noreply, NewState::#state{}} | {stop, Reason::atom(), NewState::#state{}}.
-handle_info(timeout, #state{outbuffer=Buffer}=State) ->
-    %% Flush any protocol messages that have been buffering
-    {ok, Data, NewBuffer} = riak_api_pb_frame:flush(Buffer),
-    {noreply, flush(Data, State#state{outbuffer=NewBuffer})};
-handle_info({tcp_closed, Socket}, State=#state{socket=Socket}) ->
+handle_info({tcp_closed, Socket}, _SN, State=#state{socket=Socket}) ->
     {stop, normal, State};
-handle_info({tcp_error, Socket, _Reason}, State=#state{socket=Socket}) ->
+handle_info({ssl_closed, Socket}, _SN, State=#state{socket=Socket}) ->
     {stop, normal, State};
-handle_info({tcp, _Sock, Bin}, State=#state{req=undefined,
-                                            inbuffer=InBuffer}) ->
+handle_info({tcp_error, Socket, _Reason}, _SN, State=#state{socket=Socket}) ->
+    {stop, normal, State};
+handle_info({ssl_error, Socket, _Reason}, _SN, State=#state{socket=Socket}) ->
+    {stop, normal, State};
+handle_info({Proto, Socket, Bin}, StateName, State=#state{req=undefined,
+                                              socket=Socket,
+                                              inbuffer=InBuffer}) when
+        Proto = tcp;
+        Proto = ssl ->
     %% Because we do our own outbound framing, we need to do our own
     %% inbound deframing.
     NewBuffer = <<InBuffer/binary, Bin/binary>>,
-    decode_buffer(State#state{inbuffer=NewBuffer});
-handle_info({tcp, _Sock, _Data}, State) ->
+    decode_buffer(StateName, State#state{inbuffer=NewBuffer});
+handle_info({Proto, Socket, _Data}, _SN, State=#state{socket=Socket}) when
+        Proto = tcp; Proto = ssl ->
     %% req =/= undefined: received a new request while another was in
     %% progress -> Error
     lager:debug("Received a new PB socket request"
@@ -144,28 +188,30 @@ handle_info(Message, State) ->
 
 %% @doc The gen_server terminate/2 callback, called when shutting down
 %% the server.
--spec terminate(Reason, State) -> ok when
+-spec terminate(Reason, StateName, State) -> ok when
       Reason :: normal | shutdown | {shutdown,term()} | term(),
+      StateName :: atom(),
       State :: #state{}.
-terminate(_Reason, _State) ->
+terminate(_Reason, _StateName, _State) ->
     ok.
 
 %% @doc The gen_server code_change/3 callback, called when performing
 %% a hot code upgrade on the server. Currently unused.
--spec code_change(OldVsn, State, Extra) -> {ok, State} | {error, Reason} when
+-spec code_change(OldVsn, StateName, State, Extra) -> {ok, State} | {error, Reason} when
       OldVsn :: Vsn | {down, Vsn},
       Vsn :: term(),
+      StateName :: atom(),
       State :: #state{},
       Extra :: term(),
       Reason :: term().
-code_change(_OldVsn,State,_Extra) ->
+code_change(_OldVsn, _StateName, State, _Extra) ->
     {ok, State}.
 
 %% ===================================================================
 %% Internal functions
 %% ===================================================================
 
-decode_buffer(State=#state{socket=Socket,
+decode_buffer(StateName, State=#state{socket=Socket,
                            inbuffer=Buffer}) ->
     case erlang:decode_packet(4, Buffer, []) of
         {ok, <<MsgCode:8, MsgData/binary>>, Rest} ->
