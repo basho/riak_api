@@ -123,14 +123,14 @@ wait_for_tls({msg, MsgCode, _MsgData}, State=#state{socket=Socket,
                                          %% we don't care if the peer doesn't
                                          %% sent a certificate
                                          {verify, verify_peer},
-                                         {reuse_sessions, false}, %% required!
-                                         {verify_fun, {fun verify_fun/3, self()}}], 1000) of
+                                         {reuse_sessions, false} %% required!
+                                        ]) of
                 {ok, NewSocket} ->
-                    CommonName = receive
-                        {peer_name, CN} ->
-                            CN
-                    after
-                        0 ->
+                    CommonName = case ssl:peercert(NewSocket) of
+                        {ok, Cert} ->
+                            OTPCert = public_key:pkix_decode_cert(Cert, otp),
+                            riak_core_ssl_util:get_common_name(OTPCert);
+                        {error, _Reason} ->
                             undefined
                     end,
                     lager:info("STARTTLS succeeded, peer's common name was ~p",
@@ -150,19 +150,6 @@ wait_for_tls({msg, MsgCode, _MsgData}, State=#state{socket=Socket,
     end;
 wait_for_tls(_Event, State) ->
     {next_state, wait_for_tls, State}.
-
-%% This is purely for side effects, sadly, because the SSL api doesn't seem to
-%% provide any access to the peer's certificate after the handshake completes.
-verify_fun(_,{bad_cert, _}, UserState) ->
-    {valid, UserState};
-verify_fun(_,{extension, _}, UserState) ->
-    {unknown, UserState};
-verify_fun(_, valid, UserState) ->
-    {valid, UserState};
-verify_fun(Cert, valid_peer, UserState) ->
-    %% send a message back to the caller with the peer name
-    UserState ! {peer_name, riak_core_ssl_util:get_common_name(Cert)},
-    {valid, UserState}.
 
 wait_for_tls(_Event, _From, State) ->
     {reply, unknown_message, wait_for_tls, State}.
