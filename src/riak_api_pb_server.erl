@@ -50,7 +50,8 @@
           req,                % current request
           states :: orddict:orddict(),    % per-service connection state
           peername :: undefined | {inet:ip_address(), pos_integer()},
-          authcontext,
+          common_name :: undefined | string(),
+          security,
           inbuffer = <<>>, % when an incomplete message comes in, we have to unpack it ourselves
           outbuffer = riak_api_pb_frame:new() :: riak_api_pb_frame:buffer() % frame buffer which we can use to optimize TCP sends
          }).
@@ -115,17 +116,31 @@ wait_for_tls({msg, MsgCode, _MsgData}, State=#state{socket=Socket,
                                                                        certfile)},
                                          {keyfile, app_helper:get_env(riak_api,
                                                                       keyfile)},
-                                         %% TODO with certifcate auth, change this
-                                         %% to verify_peer
-                                         {verify, verify_none}], 1000) of
+                                        {cacertfile,
+                                         app_helper:get_env(riak_api,
+                                                            cacertfile)},
+                                         %% force peer validation, even though
+                                         %% we don't care if the peer doesn't
+                                         %% sent a certificate
+                                         {verify, verify_peer},
+                                         {reuse_sessions, false}, %% required!
+                                         {verify_fun, {fun verify_fun/3, self()}}], 1000) of
                 {ok, NewSocket} ->
-                    lager:info("STARTTLS succeeded"),
+                    CommonName = receive
+                        {peer_name, CN} ->
+                            CN
+                    after
+                        0 ->
+                            undefined
+                    end,
+                    lager:info("STARTTLS succeeded, peer's common name was ~p",
+                               [CommonName]),
                     {next_state, wait_for_auth,
-                     State#state{socket=NewSocket, transport=ranch_ssl}};
+                     State#state{socket=NewSocket, common_name=CommonName, transport=ranch_ssl}};
                 {error, Reason} ->
                     lager:warning("STARTTLS with client ~s failed: ~p",
                                   [format_peername(State#state.peername), Reason]),
-                    {next_state, wait_for_tls, State}
+                    {stop, {error, {startls_failed, Reason}}, State}
             end;
         _ ->
             lager:info("got msgcode ~p", [MsgCode]),
@@ -135,6 +150,19 @@ wait_for_tls({msg, MsgCode, _MsgData}, State=#state{socket=Socket,
     end;
 wait_for_tls(_Event, State) ->
     {next_state, wait_for_tls, State}.
+
+%% This is purely for side effects, sadly, because the SSL api doesn't seem to
+%% provide any access to the peer's certificate after the handshake completes.
+verify_fun(_,{bad_cert, _}, UserState) ->
+    {valid, UserState};
+verify_fun(_,{extension, _}, UserState) ->
+    {unknown, UserState};
+verify_fun(_, valid, UserState) ->
+    {valid, UserState};
+verify_fun(Cert, valid_peer, UserState) ->
+    %% send a message back to the caller with the peer name
+    UserState ! {peer_name, riak_core_ssl_util:get_common_name(Cert)},
+    {valid, UserState}.
 
 wait_for_tls(_Event, _From, State) ->
     {reply, unknown_message, wait_for_tls, State}.
@@ -146,16 +174,27 @@ wait_for_auth({msg, MsgCode, MsgData}, State=#state{socket=Socket}) ->
             AuthReq = riak_pb_codec:decode(MsgCode, MsgData),
             lager:info("user authed with ~p/~p", [AuthReq#rpbauthreq.user,
                                                   AuthReq#rpbauthreq.password]),
-            case AuthReq#rpbauthreq.user == <<"username">> andalso
-                AuthReq#rpbauthreq.password == <<"password">> of
-                true ->
-                    lager:info("authentication succeeded"),
+            User = binary_to_list(AuthReq#rpbauthreq.user),
+            Password = binary_to_list(AuthReq#rpbauthreq.password),
+            {PeerIP, _PeerPort} = State#state.peername,
+            case riak_core_security:authenticate(User, Password, [{ip,
+                                                                   PeerIP},
+                                                                  {common_name,
+                                                                   State#state.common_name}]) of
+                {ok, SecurityContext} ->
+                    lager:info("authentication for ~p from ~p succeeded",
+                               [User, PeerIP]),
                     AuthResp = riak_pb_codec:msg_code(rpbauthresp),
                     ssl:send(Socket, <<1:32/unsigned-big, AuthResp:8>>),
-                    lager:info("AUTH succeeded"),
-                    {next_state, connected, State};
-                false ->
-                    lager:info("authentication failed"),
+                    {next_state, connected,
+                     State#state{security=SecurityContext}};
+                {error, Reason} ->
+                    %% Allow the client to reauthenticate, I guess?
+
+                    %% Add a delay to make brute-force attempts more annoying
+                    timer:sleep(5000),
+                    lager:info("authentication for ~p from ~p failed: ~p",
+                               [User, PeerIP, Reason]),
                     State1 = send_error_and_flush("Authentication failed",
                                                   State),
                     {next_state, wait_for_auth, State1}
