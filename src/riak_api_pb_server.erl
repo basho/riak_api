@@ -212,6 +212,28 @@ connected({msg, MsgCode, MsgData}, State=#state{states=ServiceStates}) ->
                         %% Process the message
                         ServiceState = orddict:fetch(Service, ServiceStates),
                         process_message(Service, Message, ServiceState, State);
+                    {ok, Message, {Permission, Bucket}} ->
+                        case State#state.security of
+                            undefined ->
+                                ServiceState = orddict:fetch(Service, ServiceStates),
+                                process_message(Service, Message, ServiceState, State);
+                            SecCtx ->
+                                case riak_core_security:check_permission(
+                                        Permission, binary_to_list(Bucket), SecCtx) of
+                                    {true, NewCtx} ->
+                                        ServiceState = orddict:fetch(Service, ServiceStates),
+                                        process_message(Service, Message,
+                                                        ServiceState,
+                                                        State#state{security=NewCtx});
+                                    {false, NewCtx} ->
+                                        User = riak_core_security:get_username(NewCtx),
+                                        send_error("Permission ~s denied to "
+                                                   "user ~s on ~s",
+                                                   [Permission, User,
+                                                    Bucket],
+                                                   State#state{security=NewCtx})
+                                end
+                        end;
                     {error, Reason} ->
                         send_error("Message decoding error: ~p", [Reason], State)
                 end;
