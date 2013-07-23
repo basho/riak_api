@@ -144,7 +144,7 @@ wait_for_tls({msg, MsgCode, _MsgData}, State=#state{socket=Socket,
             end;
         _ ->
             lager:info("got msgcode ~p", [MsgCode]),
-            State1 = send_error_and_flush("Security is enabled, please STARTLS first",
+            State1 = send_error_and_flush("Security is enabled, please STARTTLS first",
                                  State),
             {next_state, wait_for_tls, State1}
     end;
