@@ -31,10 +31,10 @@
 
 -define(CHILD(I, Type), {I, {I, start_link, []}, permanent, 5000, Type, [I]}).
 -define(CHILD(I, Type, Args), {I, {I, start_link, Args}, permanent, 5000, Type, [I]}).
--define(LNAME(IP, Port), lists:flatten(io_lib:format("~p:~p", [IP, Port]))).
--define(LISTENER(IP, Port), {?LNAME(IP, Port),
-                             {riak_api_pb_listener, start_link, [IP, Port]}, 
-                             permanent, 5000, worker, [riak_api_pb_listener]}).
+-define(LNAME(IP, Port), lists:flatten(io_lib:format("pb://~p:~p", [IP, Port]))).
+-define(PB_LISTENER(IP, Port), {?LNAME(IP, Port),
+                                {riak_api_pb_listener, start_link, [IP, Port]},
+                                permanent, 5000, worker, [riak_api_pb_listener]}).
 %% @doc Starts the supervisor.
 -spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
@@ -47,18 +47,32 @@ start_link() ->
       MaxT :: pos_integer(),
       ChildSpec :: supervisor:child_spec().
 init([]) ->
-    Listeners = riak_api_pb_listener:get_listeners(),
     Helper = ?CHILD(riak_api_pb_registration_helper, worker),
     Registrar = ?CHILD(riak_api_pb_registrar, worker),
-    NetworkProcesses = if Listeners /= [] ->
-                               [?CHILD(riak_api_pb_sup, supervisor)] ++
-                                   listener_specs(Listeners);
-                          true ->
-                               lager:info("No PB listeners were configured,"
-                                          " PB connections will be disabled."),
-                               []
-                       end,
+    PBProcesses = pb_processes(riak_api_pb_listener:get_listeners()),
+    WebProcesses = web_processes(riak_api_web:get_listeners()),
+    NetworkProcesses = PBProcesses ++ WebProcesses,
     {ok, {{one_for_one, 10, 10}, [Helper, Registrar|NetworkProcesses]}}.
 
-listener_specs(Pairs) ->
-    [ ?LISTENER(IP, Port) || {IP, Port} <- Pairs ].
+%% Generates child specs from the HTTP/HTTPS listener configuration.
+%% @private
+web_processes([]) ->
+    lager:info("No HTTP/HTTPS listeners were configured, HTTP connections will be disabled."),
+    [];
+web_processes(Listeners) ->
+    lists:flatten([ web_listener_spec(Scheme, Binding) ||
+                      {Scheme, Binding} <- Listeners ]).
+
+web_listener_spec(Scheme, Binding) ->
+    riak_api_web:binding_config(Scheme, Binding).
+
+%% Generates child specs from the PB listener configuration.
+%% @private
+pb_processes([]) ->
+    lager:info("No PB listeners were configured, PB connections will be disabled."),
+    [];
+pb_processes(Listeners) ->
+    [?CHILD(riak_api_pb_sup, supervisor)| pb_listener_specs(Listeners)].
+
+pb_listener_specs(Pairs) ->
+    [ ?PB_LISTENER(IP, Port) || {IP, Port} <- Pairs ].
