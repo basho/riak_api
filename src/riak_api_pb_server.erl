@@ -161,8 +161,8 @@ wait_for_auth({msg, MsgCode, MsgData}, State=#state{socket=Socket}) ->
             AuthReq = riak_pb_codec:decode(MsgCode, MsgData),
             lager:info("user authed with ~p/~p", [AuthReq#rpbauthreq.user,
                                                   AuthReq#rpbauthreq.password]),
-            User = binary_to_list(AuthReq#rpbauthreq.user),
-            Password = binary_to_list(AuthReq#rpbauthreq.password),
+            User = AuthReq#rpbauthreq.user,
+            Password = AuthReq#rpbauthreq.password,
             {PeerIP, _PeerPort} = State#state.peername,
             case riak_core_security:authenticate(User, Password, [{ip,
                                                                    PeerIP},
@@ -219,7 +219,7 @@ connected({msg, MsgCode, MsgData}, State=#state{states=ServiceStates}) ->
                                 process_message(Service, Message, ServiceState, State);
                             SecCtx ->
                                 case riak_core_security:check_permission(
-                                        Permission, binary_to_list(Bucket), SecCtx) of
+                                        Permission, Bucket, SecCtx) of
                                     {true, NewCtx} ->
                                         ServiceState = orddict:fetch(Service, ServiceStates),
                                         process_message(Service, Message,
