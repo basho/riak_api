@@ -1,6 +1,6 @@
 %% -------------------------------------------------------------------
 %%
-%% riak_core_pb_bucket: Expose Core bucket functionality to Protocol Buffers
+%% riak_core_pb_bucket_type: Expose Core bucket type functionality to Protocol Buffers
 %%
 %% Copyright (c) 2012 Basho Technologies, Inc.  All Rights Reserved.
 %%
@@ -20,27 +20,18 @@
 %%
 %% -------------------------------------------------------------------
 
-%% @doc <p>The Bucket PB service for Riak Core. This is included in
+%% @doc <p>The Bucket type PB service for Riak Core. This is included in
 %% the Riak API application because of startup-time constraints. This
-%% service covers the following request messages in the original
-%% protocol:</p>
+%% service covers the following request messages:</p>
 %%
 %% <pre>
-%% 19 - RpbGetBucketReq
-%% 21 - RpbSetBucketReq
-%% 29 - RpbResetBucketReq
-%% </pre>
-%%
-%% <p>This service produces the following responses:</p>
-%%
-%% <pre>
-%% 20 - RpbGetBucketResp
-%% 22 - RpbSetBucketResp
-%% 30 - RpbResetBucketResp
+%% 19 - RpbGetBucketTypeReq
+%% 21 - RpbSetBucketTypeReq
+%% 29 - RpbResetBucketTypeReq
 %% </pre>
 %%
 %% @end
--module(riak_core_pb_bucket).
+-module(riak_core_pb_bucket_type).
 
 -behaviour(riak_api_pb_service).
 
@@ -56,7 +47,7 @@ init() ->
     undefined.
 
 %% @doc decode/2 callback. Decodes an incoming message.
-decode(Code, Bin) when Code == 19; Code == 21; Code == 29 ->
+decode(Code, Bin) when Code == 31; Code == 32; Code == 33 ->
     {ok, riak_pb_codec:decode(Code, Bin)}.
 
 %% @doc encode/1 callback. Encodes an outgoing response message.
@@ -64,17 +55,19 @@ encode(Message) ->
     {ok, riak_pb_codec:encode(Message)}.
 
 %% Get bucket properties
-process(#rpbgetbucketreq{type = T, bucket=B}, State) ->
-    Bucket = maybe_create_bucket_type(T, B),
-    Props = riak_core_bucket:get_bucket(Bucket),
-    PbProps = riak_pb_codec:encode_bucket_props(Props),
-    {reply, #rpbgetbucketresp{props = PbProps}, State};
+process(#rpbgetbuckettypereq{type = T}, State) ->
+    case riak_core_bucket_type:get(T) of
+        undefined ->
+            {error, {format, "Invalid bucket type: ~p", [T]}, State};
+        Props ->
+            PbProps = riak_pb_codec:encode_bucket_props(Props),
+            {reply, #rpbgetbucketresp{props = PbProps}, State}
+    end;
 
 %% Set bucket properties
-process(#rpbsetbucketreq{type = T, bucket=B, props = PbProps}, State) ->
+process(#rpbsetbuckettypereq{type = T, props = PbProps}, State) ->
     Props = riak_pb_codec:decode_bucket_props(PbProps),
-    Bucket = maybe_create_bucket_type(T, B),
-    case riak_core_bucket:set_bucket(Bucket, Props) of
+    case riak_core_bucket_type:update(T, Props) of
         ok ->
             {reply, rpbsetbucketresp, State};
         {error, Details} ->
@@ -82,18 +75,14 @@ process(#rpbsetbucketreq{type = T, bucket=B, props = PbProps}, State) ->
     end;
 
 %% Reset bucket properties
-process(#rpbresetbucketreq{type = T, bucket=B}, State) ->
-    Bucket = maybe_create_bucket_type(T, B),
-    riak_core_bucket:reset_bucket(Bucket),
-    {reply, rpbresetbucketresp, State}.
+process(#rpbresetbuckettypereq{type = T}, State) ->
+    case riak_core_bucket_type:reset(T) of
+        ok ->
+            {reply, rpbresetbucketresp, State};
+        _ ->
+            {error, {format, "Invalid bucket type: ~p", [T]}, State}
+    end.
 
 process_stream(_, _, State) ->
     {ignore, State}.
-
-maybe_create_bucket_type(<<"default">>, Bucket) ->
-    Bucket;
-maybe_create_bucket_type(undefined, Bucket) ->
-    Bucket;
-maybe_create_bucket_type(Type, Bucket) ->
-    {Type, Bucket}.
 
