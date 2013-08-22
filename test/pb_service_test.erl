@@ -226,6 +226,20 @@ deregister_during_shutdown_test_() ->
             end)
      }.
 
+swap_test_() ->
+    {setup,
+     fun setup/0,
+     fun cleanup/1,
+     ?_test(begin
+                ?assertEqual([102|<<"ok">>], request(101, <<>>)),
+                R1 = riak_api_pb_service:swap(pb_dummy_svc, 99, 110),
+                ?assertMatch({error, _}, R1),
+                R2 = riak_api_pb_service:swap(pb_dummy_svc, 99, 109),
+                ?assertEqual(ok, R2),
+                ?assertEqual([102|<<"swap">>], request(101, <<>>))
+            end)}.
+
+
 wait_for_port() ->
     wait_for_port(10000).
 

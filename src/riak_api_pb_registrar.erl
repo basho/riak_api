@@ -41,6 +41,7 @@
          start_link/0,
          register/1,
          deregister/1,
+         swap/3,
          set_heir/1,
          services/0,
          lookup/1
@@ -83,6 +84,11 @@ deregister(Registrations) ->
             ok
     end.
 
+%% @doc Atomically swap currently registered module with `NewModule'.
+-spec swap(module(), pos_integer(), pos_integer()) -> ok | {error, Reason::term()}.
+swap(NewModule, MinCode, MaxCode) ->
+    gen_server:call(?SERVER, {swap, NewModule, MinCode, MaxCode}, infinity).
+
 %% @doc Sets the heir of the registrations table on behalf of the
 %%      helper process.
 %% @private
@@ -122,7 +128,11 @@ handle_call({register, Registrations}, _From, State) ->
     {reply, Reply, State};
 handle_call({deregister, Registrations}, _From, State) ->
     Reply = do_deregister(Registrations),
+    {reply, Reply, State};
+handle_call({swap, NewModule, MinCode, MaxCode}, _From, State) ->
+    Reply = do_swap(NewModule, MinCode, MaxCode),
     {reply, Reply, State}.
+
 
 handle_cast(_Msg, State) ->
     {noreply, State}.
@@ -174,6 +184,16 @@ do_register(Module, MinCode, MaxCode) ->
             {error, {already_registered, AlreadyClaimed}}
     end.
 
+do_swap(NewModule, MinCode, MaxCode) ->
+    CodeRange = lists:seq(MinCode, MaxCode),
+    Matching = lists:filter(fun is_registered/1, CodeRange),
+    case length(Matching) == length(CodeRange) of
+        true ->
+            ets:insert(?ETS_NAME, [{Code, NewModule} || Code <- CodeRange]),
+            riak_api_pb_sup:service_registered(NewModule);
+        false ->
+            {error, {range_not_registered, CodeRange}}
+    end.
 
 do_deregister([]) ->
     ok;

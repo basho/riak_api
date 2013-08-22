@@ -167,7 +167,8 @@
          register/3,
          deregister/1,
          deregister/2,
-         deregister/3]).
+         deregister/3,
+         swap/3]).
 
 -type registration() :: {Service::module(), MinCode::pos_integer(), MaxCode::pos_integer()}.
 
@@ -230,3 +231,10 @@ deregister(Module, Code) ->
 -spec deregister(Module::module(), MinCode::pos_integer(), MaxCode::pos_integer()) -> ok | {error, Err::term()}.
 deregister(Module, MinCode, MaxCode) ->
     deregister([{Module, MinCode, MaxCode}]).
+
+%% @doc Perform an atomic swap of current module to `NewModule' for
+%% the given code range.  The code range must exactly match an
+%% existing range.  Otherwise an error is returned.
+-spec swap(module(), pos_integer(), pos_integer()) -> ok | {error, Err::term()}.
+swap(NewModule, MinCode, MaxCode) ->
+    riak_api_pb_registrar:swap(NewModule, MinCode, MaxCode).
