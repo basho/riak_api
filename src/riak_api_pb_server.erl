@@ -202,7 +202,8 @@ handle_message(MsgCode, MsgData, State=#state{states=ServiceStates}) ->
                         send_error("Message decoding error: ~p", [Reason], State)
                 end;
             error ->
-                send_error("Unknown message code.", State)
+                send_error(io_lib:format("Unknown message code: ~p",
+                                         [MsgCode]), State)
         end,
         {ok, NewState}
     catch
