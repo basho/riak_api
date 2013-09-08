@@ -45,7 +45,9 @@ start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 register_stats() ->
-    riak_core_stat:register_stats(?APP, stats()).
+    [(catch exometer_entry:delete([?APP, Name])) || {Name, _Type} <- stats()],
+    [register_stat(stat_name(Stat), Type) || {Stat, Type} <- stats()],
+    riak_core_stat_cache:register_app(?APP, {?MODULE, produce_stats, []}).
 
 %% @doc Return current aggregation of all stats.
 -spec get_stats() -> proplists:proplist().
@@ -89,7 +91,7 @@ code_change(_OldVsn, State, _Extra) ->
 %% @doc Update the given `Stat'.
 -spec update1(term()) -> ok.
 update1(pbc_connect) ->
-    exometer:update([?APP, pbc_connects], 1).
+    exometer_entry:update([?APP, pbc_connects], 1).
 
 %% -------------------------------------------------------------------
 %% Private
@@ -101,7 +103,27 @@ stats() ->
       {function, ?MODULE, active_pb_connects}}
     ].
 
-active_pb_connects(_) ->
+%% stat_name(Name) when is_list(Name) ->
+%%     list_to_tuple([?APP] ++ Name);
+%% stat_name(Name) when is_atom(Name) ->
+%%     {?APP, Name}.
+stat_name(Name) ->
+    [?APP | stat_name_(Name)].
+
+stat_name_(Name) when is_tuple(Name) ->
+    tuple_to_list(Name);
+stat_name_(Name) when is_list(Name) ->
+    Name;
+stat_name_(Name) when is_atom(Name) ->
+    [Name].
+
+
+register_stat(Name, spiral) ->
+    exometer_entry:new(Name, spiral);
+register_stat(Name, {function, _Module, _Function}=Fun) ->
+    exometer_entry:new(Name, Fun).
+
+active_pb_connects() ->
     %% riak_api_pb_sup will not be running when there are no listeners
     %% defined.
     case erlang:whereis(riak_api_pb_sup) of
