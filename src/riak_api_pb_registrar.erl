@@ -87,7 +87,7 @@ deregister(Registrations) ->
 %% @doc Atomically swap currently registered module with `NewModule'.
 -spec swap(module(), pos_integer(), pos_integer()) -> ok | {error, Reason::term()}.
 swap(NewModule, MinCode, MaxCode) ->
-    gen_server:call(?SERVER, {swap, NewModule, MinCode, MaxCode}, infinity).
+    gen_server:call(?SERVER, {swap, {NewModule, MinCode, MaxCode}}, infinity).
 
 %% @doc Sets the heir of the registrations table on behalf of the
 %%      helper process.
@@ -129,7 +129,7 @@ handle_call({register, Registrations}, _From, State) ->
 handle_call({deregister, Registrations}, _From, State) ->
     Reply = do_deregister(Registrations),
     {reply, Reply, State};
-handle_call({swap, NewModule, MinCode, MaxCode}, _From, State) ->
+handle_call({swap, {NewModule, MinCode, MaxCode}}, _From, State) ->
     Reply = do_swap(NewModule, MinCode, MaxCode),
     {reply, Reply, State}.
 
@@ -360,6 +360,7 @@ registration_inheritance_test_() ->
       ?_test(begin
                  Outer = self(),
                  %% Helper = whereis(riak_api_pb_registration_helper),
+                 ?assertEqual(ok, riak_api_pb_service:register(bar, 1000, 1000)),
                  Registrar = whereis(?MODULE),
                  exit(Registrar, brutal_kill),
                  meck:new(riak_api_pb_registration_helper, [passthrough]),
@@ -377,11 +378,16 @@ registration_inheritance_test_() ->
                  spawn(fun() ->
                                Outer ! {101, riak_api_pb_service:register(foo, 101, 101)}
                        end),
+                 spawn(fun() ->
+                               Outer ! {1000, riak_api_pb_service:swap(foo, 1000, 1000)}
+                       end),
                  ?assertEqual(ok, receive {100, Msg} -> Msg after 1500 -> fail end),
                  ?assertEqual(ok, receive {101, Msg} -> Msg after 1500 -> fail end),
+                 ?assertEqual(ok, receive {1000, Msg} -> Msg after 1500 -> fail end),
                  meck:unload(),
                  exit(NewReg, brutal_kill)
              end)
+
      ]}.
 
 -endif.
