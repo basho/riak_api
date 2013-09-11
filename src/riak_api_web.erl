@@ -32,14 +32,17 @@ get_listeners() ->
     get_listeners(http) ++ get_listeners(https).
 
 get_listeners(Scheme) ->
-    APISetting = app_helper:get_env(riak_api, Scheme, []),
-    case app_helper:get_env(riak_core, Scheme, undefined) of
-        undefined ->
-            [ {Scheme, Binding} || Binding <- APISetting ];
-        List ->
-            lager:warning("Setting riak_core/~s is deprecated, please use riak_api/~s", [Scheme, Scheme]),
-            lists:usort([ {Scheme, Binding} || Binding <- List ++ APISetting ])
-    end.
+    Listeners = case app_helper:try_envs([{riak_api, Scheme},
+                                          {riak_core, Scheme}], []) of
+                    {riak_api, Scheme, List} when is_list(List) ->
+                        List;
+                    {riak_core, Scheme, List} when is_list(List) ->
+                        lager:warning("Setting riak_core/~s is deprecated, please use riak_api/~s", [Scheme, Scheme]),
+                        List;
+                    _ ->
+                        []
+                end,
+    lists:usort([ {Scheme, Binding} || Binding <- Listeners ]).
 
 binding_config(Scheme, Binding) ->
     {Ip, Port} = Binding,
