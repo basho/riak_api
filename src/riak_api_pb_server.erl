@@ -212,25 +212,22 @@ connected({msg, MsgCode, MsgData}, State=#state{states=ServiceStates}) ->
                         %% Process the message
                         ServiceState = orddict:fetch(Service, ServiceStates),
                         process_message(Service, Message, ServiceState, State);
-                    {ok, Message, {Permission, Bucket}} ->
+                    {ok, Message, Permissions} ->
                         case State#state.security of
                             undefined ->
                                 ServiceState = orddict:fetch(Service, ServiceStates),
                                 process_message(Service, Message, ServiceState, State);
                             SecCtx ->
-                                case riak_core_security:check_permission(
-                                        Permission, Bucket, SecCtx) of
+                                case riak_core_security:check_permissions(
+                                        Permissions, SecCtx) of
                                     {true, NewCtx} ->
                                         ServiceState = orddict:fetch(Service, ServiceStates),
                                         process_message(Service, Message,
                                                         ServiceState,
                                                         State#state{security=NewCtx});
-                                    {false, NewCtx} ->
-                                        User = riak_core_security:get_username(NewCtx),
-                                        send_error("Permission ~s denied to "
-                                                   "user ~s on ~s",
-                                                   [Permission, User,
-                                                    Bucket],
+                                    {false, Error, NewCtx} ->
+                                        send_error(Error,
+                                                   [],
                                                    State#state{security=NewCtx})
                                 end
                         end;
@@ -517,3 +514,5 @@ send_error_and_flush(Error, State) ->
 
 format_peername({IP, Port}) ->
     io_lib:format("~s:~B", [inet_parse:ntoa(IP), Port]).
+
+
