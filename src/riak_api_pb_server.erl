@@ -52,6 +52,7 @@
           peername :: undefined | {inet:ip_address(), pos_integer()},
           common_name :: undefined | string(),
           security,
+          retries = 3,
           inbuffer = <<>>, % when an incomplete message comes in, we have to unpack it ourselves
           outbuffer = riak_api_pb_frame:new() :: riak_api_pb_frame:buffer() % frame buffer which we can use to optimize TCP sends
          }).
@@ -133,7 +134,7 @@ wait_for_tls({msg, MsgCode, _MsgData}, State=#state{socket=Socket,
                         {error, _Reason} ->
                             undefined
                     end,
-                    lager:info("STARTTLS succeeded, peer's common name was ~p",
+                    lager:debug("STARTTLS succeeded, peer's common name was ~p",
                                [CommonName]),
                     {next_state, wait_for_auth,
                      State#state{socket=NewSocket, common_name=CommonName, transport=ranch_ssl}};
@@ -143,7 +144,7 @@ wait_for_tls({msg, MsgCode, _MsgData}, State=#state{socket=Socket,
                     {stop, {error, {startls_failed, Reason}}, State}
             end;
         _ ->
-            lager:info("got msgcode ~p", [MsgCode]),
+            lager:debug("Client sent unexpected message code ~p", [MsgCode]),
             State1 = send_error_and_flush("Security is enabled, please STARTTLS first",
                                  State),
             {next_state, wait_for_tls, State1}
@@ -154,7 +155,8 @@ wait_for_tls(_Event, State) ->
 wait_for_tls(_Event, _From, State) ->
     {reply, unknown_message, wait_for_tls, State}.
 
-wait_for_auth({msg, MsgCode, MsgData}, State=#state{socket=Socket}) ->
+wait_for_auth({msg, MsgCode, MsgData}, State=#state{socket=Socket,
+                                                    transport=Transport}) ->
     case riak_pb_codec:msg_code(rpbauthreq) of
         MsgCode ->
             %% got AUTH message, try to validate credentials
@@ -172,7 +174,7 @@ wait_for_auth({msg, MsgCode, MsgData}, State=#state{socket=Socket}) ->
                     lager:info("authentication for ~p from ~p succeeded",
                                [User, PeerIP]),
                     AuthResp = riak_pb_codec:msg_code(rpbauthresp),
-                    ssl:send(Socket, <<1:32/unsigned-big, AuthResp:8>>),
+                    Transport:send(Socket, <<1:32/unsigned-big, AuthResp:8>>),
                     {next_state, connected,
                      State#state{security=SecurityContext}};
                 {error, Reason} ->
@@ -180,11 +182,18 @@ wait_for_auth({msg, MsgCode, MsgData}, State=#state{socket=Socket}) ->
 
                     %% Add a delay to make brute-force attempts more annoying
                     timer:sleep(5000),
-                    lager:info("authentication for ~p from ~p failed: ~p",
-                               [User, PeerIP, Reason]),
                     State1 = send_error_and_flush("Authentication failed",
                                                   State),
-                    {next_state, wait_for_auth, State1}
+                    lager:debug("authentication for ~p from ~p failed: ~p",
+                               [User, PeerIP, Reason]),
+                    case State#state.retries of
+                        N when N =< 1 ->
+                            %% no more chances
+                            {stop, normal, State};
+                        Retries ->
+                            {next_state, wait_for_auth,
+                             State1#state{retries=Retries-1}}
+                    end
             end;
         _ ->
             State1 = send_error_and_flush("Security is enabled, please "
