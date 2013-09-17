@@ -161,8 +161,6 @@ wait_for_auth({msg, MsgCode, MsgData}, State=#state{socket=Socket,
         MsgCode ->
             %% got AUTH message, try to validate credentials
             AuthReq = riak_pb_codec:decode(MsgCode, MsgData),
-            lager:info("user authed with ~p/~p", [AuthReq#rpbauthreq.user,
-                                                  AuthReq#rpbauthreq.password]),
             User = AuthReq#rpbauthreq.user,
             Password = AuthReq#rpbauthreq.password,
             {PeerIP, _PeerPort} = State#state.peername,
@@ -171,7 +169,7 @@ wait_for_auth({msg, MsgCode, MsgData}, State=#state{socket=Socket,
                                                                   {common_name,
                                                                    State#state.common_name}]) of
                 {ok, SecurityContext} ->
-                    lager:info("authentication for ~p from ~p succeeded",
+                    lager:debug("authentication for ~p from ~p succeeded",
                                [User, PeerIP]),
                     AuthResp = riak_pb_codec:msg_code(rpbauthresp),
                     Transport:send(Socket, <<1:32/unsigned-big, AuthResp:8>>),
