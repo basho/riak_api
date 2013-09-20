@@ -213,22 +213,20 @@ connected({msg, MsgCode, MsgData}, State=#state{states=ServiceStates}) ->
         %% First find the appropriate service module to dispatch
         NewState = case riak_api_pb_registrar:lookup(MsgCode) of
             {ok, Service} ->
+                ServiceState = orddict:fetch(Service, ServiceStates),
                 %% Decode the message according to the service
                 case Service:decode(MsgCode, MsgData) of
                     {ok, Message} ->
                         %% Process the message
-                        ServiceState = orddict:fetch(Service, ServiceStates),
                         process_message(Service, Message, ServiceState, State);
                     {ok, Message, Permissions} ->
                         case State#state.security of
                             undefined ->
-                                ServiceState = orddict:fetch(Service, ServiceStates),
                                 process_message(Service, Message, ServiceState, State);
                             SecCtx ->
                                 case riak_core_security:check_permissions(
                                         Permissions, SecCtx) of
                                     {true, NewCtx} ->
-                                        ServiceState = orddict:fetch(Service, ServiceStates),
                                         process_message(Service, Message,
                                                         ServiceState,
                                                         State#state{security=NewCtx});
