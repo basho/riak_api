@@ -57,7 +57,19 @@ init() ->
 
 %% @doc decode/2 callback. Decodes an incoming message.
 decode(Code, Bin) when Code == 19; Code == 21; Code == 29 ->
-    {ok, riak_pb_codec:decode(Code, Bin)}.
+    Msg =  riak_pb_codec:decode(Code, Bin),
+    case Msg of
+        #rpbgetbucketreq{type =T, bucket =B} ->
+            Bucket = bucket_type(T, B),
+            {ok, Msg, {"riak_core.get_bucket", Bucket}};
+        #rpbsetbucketreq{type=T, bucket=B} ->
+            Bucket = bucket_type(T, B),
+            {ok, Msg, {"riak_core.set_bucket", Bucket}};
+        #rpbresetbucketreq{type=T, bucket=B} ->
+            %% reset is just a fancy set
+            Bucket = bucket_type(T, B),
+            {ok, Msg, {"riak_core.set_bucket", Bucket}}
+    end.
 
 %% @doc encode/1 callback. Encodes an outgoing response message.
 encode(Message) ->
@@ -97,3 +109,8 @@ maybe_create_bucket_type(undefined, Bucket) ->
 maybe_create_bucket_type(Type, Bucket) ->
     {Type, Bucket}.
 
+%% always construct {Type, Bucket} tuple, filling in default type if needed
+bucket_type(undefined, B) ->
+    {<<"default">>, B};
+bucket_type(T, B) ->
+    {T, B}.

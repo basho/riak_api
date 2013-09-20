@@ -48,7 +48,16 @@ init() ->
 
 %% @doc decode/2 callback. Decodes an incoming message.
 decode(Code, Bin) when Code == 31; Code == 32; Code == 33 ->
-    {ok, riak_pb_codec:decode(Code, Bin)}.
+    Msg = riak_pb_codec:decode(Code, Bin),
+    case Msg of
+        #rpbgetbuckettypereq{type=T} ->
+            {ok, Msg, {"riak_core.get_bucket_type", T}};
+        #rpbsetbuckettypereq{type=T} ->
+            {ok, Msg, {"riak_core.set_bucket_type", T}};
+        #rpbresetbuckettypereq{type=T} ->
+            %% reset is a fancy set
+            {ok, Msg, {"riak_core.set_bucket_type", T}}
+    end.
 
 %% @doc encode/1 callback. Encodes an outgoing response message.
 encode(Message) ->
