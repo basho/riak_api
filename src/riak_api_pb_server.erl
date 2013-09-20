@@ -94,7 +94,7 @@ wait_for_socket({set_socket, Socket}, _From, State=#state{transport=Transport}) 
     Transport:setopts(Socket, [{active, once}]),
     %% check if security is enabled, if it is wait for TLS, otherwise go
     %% straight into connected state
-    case app_helper:get_env(riak_core, security, false) of
+    case riak_core_security:is_enabled() of
         true ->
             {reply, ok, wait_for_tls, State#state{socket=Socket,
                                                   peername=PeerInfo}};
