@@ -30,17 +30,29 @@
 -include_lib("eunit/include/eunit.hrl").
 -endif.
 
--behaviour(gen_server).
+-include_lib("riak_pb/include/riak_pb.hrl").
 
+-behaviour(gen_fsm).
+
+%% API
 -export([start_link/0, set_socket/2]).
 
--export([init/1, handle_call/3, handle_cast/2, handle_info/2,
-         terminate/2, code_change/3]).
+%% States
+-export([wait_for_socket/2, wait_for_socket/3, wait_for_tls/2, wait_for_tls/3,
+         wait_for_auth/2, wait_for_auth/3, connected/2, connected/3]).
+
+-export([init/1, handle_event/3, handle_sync_event/4, handle_info/3,
+         terminate/3, code_change/4]).
 
 -record(state, {
+          transport = ranch_tcp :: 'ranch_tcp' | 'ranch_ssl',
           socket :: port(),   % socket
           req,                % current request
           states :: orddict:orddict(),    % per-service connection state
+          peername :: undefined | {inet:ip_address(), pos_integer()},
+          common_name :: undefined | string(),
+          security,
+          retries = 3,
           inbuffer = <<>>, % when an incomplete message comes in, we have to unpack it ourselves
           outbuffer = riak_api_pb_frame:new() :: riak_api_pb_frame:buffer() % frame buffer which we can use to optimize TCP sends
          }).
@@ -55,12 +67,12 @@
 %% @doc Starts a PB server, ready to service a single socket.
 -spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
-    gen_server:start_link(?MODULE, [], []).
+    gen_fsm:start_link(?MODULE, [], []).
 
 %% @doc Sets the socket to service for this server.
 -spec set_socket(pid(), port()) -> ok.
 set_socket(Pid, Socket) ->
-    gen_server:call(Pid, {set_socket, Socket}, infinity).
+    gen_fsm:sync_send_event(Pid, {set_socket, Socket}, infinity).
 
 %% @doc The gen_server init/1 callback, initializes the
 %% riak_api_pb_server.
@@ -70,18 +82,183 @@ init([]) ->
     ServiceStates = lists:foldl(fun(Service, States) ->
                                         orddict:store(Service, Service:init(), States)
                                 end,
-                                orddict:new(), riak_api_pb_registrar:services()),
-    {ok, #state{states=ServiceStates}}.
+                                orddict:new(),
+                                riak_api_pb_registrar:services()),
+    {ok, wait_for_socket, #state{states=ServiceStates}}.
 
-%% @doc The handle_call/3 gen_server callback.
--spec handle_call(Message::term(), From::{pid(),term()}, State::#state{}) -> {reply, Message::term(), NewState::#state{}}.
-handle_call({set_socket, Socket}, _From, State) ->
-    inet:setopts(Socket, [{active, once}]),
-    {reply, ok, State#state{socket = Socket}}.
+wait_for_socket(_Event, State) ->
+    {next_state, wait_for_socket, State}.
 
-%% @doc The handle_cast/2 gen_server callback.
--spec handle_cast(Message::term(), State::#state{}) -> {noreply, NewState::#state{}, timeout()}.
-handle_cast({registered, Service}, #state{states=ServiceStates}=State) ->
+wait_for_socket({set_socket, Socket}, _From, State=#state{transport=Transport}) ->
+    {ok, PeerInfo} = Transport:peername(Socket),
+    Transport:setopts(Socket, [{active, once}]),
+    %% check if security is enabled, if it is wait for TLS, otherwise go
+    %% straight into connected state
+    case riak_core_security:is_enabled() of
+        true ->
+            {reply, ok, wait_for_tls, State#state{socket=Socket,
+                                                  peername=PeerInfo}};
+        false ->
+            {reply, ok, connected, State#state{socket=Socket,
+                                               peername=PeerInfo}}
+    end;
+wait_for_socket(_Event, _From, State) ->
+    {reply, unknown_message, wait_for_socket, State}.
+
+wait_for_tls({msg, MsgCode, _MsgData}, State=#state{socket=Socket,
+                                                    transport=Transport}) ->
+    case riak_pb_codec:msg_code(rpbstarttls) of
+        MsgCode ->
+            %% got STARTTLS msg, send ACK back to client
+            Transport:send(Socket, <<1:32/unsigned-big, MsgCode:8>>),
+            %% now do the SSL handshake
+            case ssl:ssl_accept(Socket, [{certfile,
+                                          app_helper:get_env(riak_api,
+                                                                       certfile)},
+                                         {keyfile, app_helper:get_env(riak_api,
+                                                                      keyfile)},
+                                        {cacertfile,
+                                         app_helper:get_env(riak_api,
+                                                            cacertfile)},
+                                         %% force peer validation, even though
+                                         %% we don't care if the peer doesn't
+                                         %% sent a certificate
+                                         {verify, verify_peer},
+                                         {reuse_sessions, false} %% required!
+                                        ]) of
+                {ok, NewSocket} ->
+                    CommonName = case ssl:peercert(NewSocket) of
+                        {ok, Cert} ->
+                            OTPCert = public_key:pkix_decode_cert(Cert, otp),
+                            riak_core_ssl_util:get_common_name(OTPCert);
+                        {error, _Reason} ->
+                            undefined
+                    end,
+                    lager:debug("STARTTLS succeeded, peer's common name was ~p",
+                               [CommonName]),
+                    {next_state, wait_for_auth,
+                     State#state{socket=NewSocket, common_name=CommonName, transport=ranch_ssl}};
+                {error, Reason} ->
+                    lager:warning("STARTTLS with client ~s failed: ~p",
+                                  [format_peername(State#state.peername), Reason]),
+                    {stop, {error, {startls_failed, Reason}}, State}
+            end;
+        _ ->
+            lager:debug("Client sent unexpected message code ~p", [MsgCode]),
+            State1 = send_error_and_flush("Security is enabled, please STARTTLS first",
+                                 State),
+            {next_state, wait_for_tls, State1}
+    end;
+wait_for_tls(_Event, State) ->
+    {next_state, wait_for_tls, State}.
+
+wait_for_tls(_Event, _From, State) ->
+    {reply, unknown_message, wait_for_tls, State}.
+
+wait_for_auth({msg, MsgCode, MsgData}, State=#state{socket=Socket,
+                                                    transport=Transport}) ->
+    case riak_pb_codec:msg_code(rpbauthreq) of
+        MsgCode ->
+            %% got AUTH message, try to validate credentials
+            AuthReq = riak_pb_codec:decode(MsgCode, MsgData),
+            User = AuthReq#rpbauthreq.user,
+            Password = AuthReq#rpbauthreq.password,
+            {PeerIP, _PeerPort} = State#state.peername,
+            case riak_core_security:authenticate(User, Password, [{ip,
+                                                                   PeerIP},
+                                                                  {common_name,
+                                                                   State#state.common_name}]) of
+                {ok, SecurityContext} ->
+                    lager:debug("authentication for ~p from ~p succeeded",
+                               [User, PeerIP]),
+                    AuthResp = riak_pb_codec:msg_code(rpbauthresp),
+                    Transport:send(Socket, <<1:32/unsigned-big, AuthResp:8>>),
+                    {next_state, connected,
+                     State#state{security=SecurityContext}};
+                {error, Reason} ->
+                    %% Allow the client to reauthenticate, I guess?
+
+                    %% Add a delay to make brute-force attempts more annoying
+                    timer:sleep(5000),
+                    State1 = send_error_and_flush("Authentication failed",
+                                                  State),
+                    lager:debug("authentication for ~p from ~p failed: ~p",
+                               [User, PeerIP, Reason]),
+                    case State#state.retries of
+                        N when N =< 1 ->
+                            %% no more chances
+                            {stop, normal, State};
+                        Retries ->
+                            {next_state, wait_for_auth,
+                             State1#state{retries=Retries-1}}
+                    end
+            end;
+        _ ->
+            State1 = send_error_and_flush("Security is enabled, please "
+                                          "authenticate first", State),
+            {next_state, wait_for_auth, State1}
+    end;
+wait_for_auth(_Event, State) ->
+    {next_state, wait_for_auth, State}.
+
+wait_for_auth(_Event, _From, State) ->
+    {reply, unknown_message, wait_for_auth, State}.
+
+connected(timeout, State=#state{outbuffer=Buffer}) ->
+    %% Flush any protocol messages that have been buffering
+    {ok, Data, NewBuffer} = riak_api_pb_frame:flush(Buffer),
+    {next_state, connected, flush(Data, State#state{outbuffer=NewBuffer})};
+connected({msg, MsgCode, MsgData}, State=#state{states=ServiceStates}) ->
+    try
+        %% First find the appropriate service module to dispatch
+        NewState = case riak_api_pb_registrar:lookup(MsgCode) of
+            {ok, Service} ->
+                ServiceState = orddict:fetch(Service, ServiceStates),
+                %% Decode the message according to the service
+                case Service:decode(MsgCode, MsgData) of
+                    {ok, Message} ->
+                        %% Process the message
+                        process_message(Service, Message, ServiceState, State);
+                    {ok, Message, Permissions} ->
+                        case State#state.security of
+                            undefined ->
+                                process_message(Service, Message, ServiceState, State);
+                            SecCtx ->
+                                case riak_core_security:check_permissions(
+                                        Permissions, SecCtx) of
+                                    {true, NewCtx} ->
+                                        process_message(Service, Message,
+                                                        ServiceState,
+                                                        State#state{security=NewCtx});
+                                    {false, Error, NewCtx} ->
+                                        send_error(Error,
+                                                   [],
+                                                   State#state{security=NewCtx})
+                                end
+                        end;
+                    {error, Reason} ->
+                        send_error("Message decoding error: ~p", [Reason], State)
+                end;
+            error ->
+                send_error("Unknown message code.", State)
+        end,
+        {next_state, connected, NewState}
+    catch
+        %% Tell the client we errored before closing the connection.
+        Type:Failure ->
+            Trace = erlang:get_stacktrace(),
+            FState = send_error_and_flush({format, "Error processing incoming message: ~p:~p:~p",
+                                           [Type, Failure, Trace]}, State),
+            {stop, {Type, Failure, Trace}, FState}
+    end;
+connected(_Event, State) ->
+    {next_state, connected, State}.
+
+connected(_Event, _From, State) ->
+    {reply, unknown_message, connected, State}.
+
+%% @doc The handle_event/3 gen_fsm callback.
+handle_event({registered, Service}, StateName, #state{states=ServiceStates}=State) ->
     %% When a new service is registered after a client connection is
     %% already established, update the internal state to support the
     %% new capabilities.
@@ -89,45 +266,52 @@ handle_cast({registered, Service}, #state{states=ServiceStates}=State) ->
         true ->
             %% This is an existing service registering
             %% disjoint message codes
-            {noreply, State, 0};
+            {next_state, StateName, State, 0};
         false ->
             %% This is a new service registering
-            {noreply, State#state{states=orddict:store(Service, Service:init(), ServiceStates)}, 0}
+            {next_state, StateName,
+             State#state{states=orddict:store(Service, Service:init(),
+                                              ServiceStates)}, 0}
     end;
-handle_cast(_Msg, State) ->
-    {noreply, State, 0}.
+handle_event(_Msg, StateName, State) ->
+    {next_state, StateName, State, 0}.
 
-%% @doc The handle_info/2 gen_server callback.
--spec handle_info(Message::term(), State::#state{}) -> {noreply, NewState::#state{}} | {stop, Reason::atom(), NewState::#state{}}.
-handle_info(timeout, #state{outbuffer=Buffer}=State) ->
-    %% Flush any protocol messages that have been buffering
-    {ok, Data, NewBuffer} = riak_api_pb_frame:flush(Buffer),
-    {noreply, flush(Data, State#state{outbuffer=NewBuffer})};
-handle_info({tcp_closed, Socket}, State=#state{socket=Socket}) ->
+handle_sync_event(_Event, _From, StateName, State) ->
+    {reply, unknown_message, StateName, State}.
+
+%% @doc The handle_info/3 gen_fsm callback.
+handle_info({tcp_closed, Socket}, _SN, State=#state{socket=Socket}) ->
     {stop, normal, State};
-handle_info({tcp_error, Socket, _Reason}, State=#state{socket=Socket}) ->
+handle_info({ssl_closed, Socket}, _SN, State=#state{socket=Socket}) ->
     {stop, normal, State};
-handle_info({tcp, _Sock, Bin}, State=#state{req=undefined,
-                                            inbuffer=InBuffer}) ->
+handle_info({tcp_error, Socket, _Reason}, _SN, State=#state{socket=Socket}) ->
+    {stop, normal, State};
+handle_info({ssl_error, Socket, _Reason}, _SN, State=#state{socket=Socket}) ->
+    {stop, normal, State};
+handle_info({Proto, Socket, Bin}, StateName, State=#state{req=undefined,
+                                              socket=Socket,
+                                              inbuffer=InBuffer}) when
+        Proto == tcp; Proto == ssl ->
     %% Because we do our own outbound framing, we need to do our own
     %% inbound deframing.
     NewBuffer = <<InBuffer/binary, Bin/binary>>,
-    decode_buffer(State#state{inbuffer=NewBuffer});
-handle_info({tcp, _Sock, _Data}, State) ->
+    decode_buffer(StateName, State#state{inbuffer=NewBuffer});
+handle_info({Proto, Socket, _Data}, _SN, State=#state{socket=Socket}) when
+        Proto == tcp; Proto == ssl ->
     %% req =/= undefined: received a new request while another was in
     %% progress -> Error
     lager:debug("Received a new PB socket request"
                 " while another was in progress"),
     State1 = send_error_and_flush("Cannot send another request while one is in progress", State),
     {stop, normal, State1};
-handle_info(StreamMessage, #state{req={Service,ReqId,StreamState}}=State) ->
+handle_info(StreamMessage, StateName, #state{req={Service,ReqId,StreamState}}=State) ->
     %% Handle streaming messages from other processes. This should
     %% help avoid creating extra middlemen. Naturally, this is only
     %% valid when a streaming request has started, other messages will
     %% be ignored.
     try
         NewState = process_stream(Service, ReqId, StreamMessage, StreamState, State),
-        {noreply, NewState, 0}
+        {next_state, StateName, NewState, 0}
     catch
         %% Tell the client we errored before closing the connection.
         Type:Reason ->
@@ -136,42 +320,45 @@ handle_info(StreamMessage, #state{req={Service,ReqId,StreamState}}=State) ->
                                           [Type, Reason, Trace]}, State),
             {stop, {Type, Reason, Trace}, FState}
     end;
-handle_info(Message, State) ->
+handle_info(Message, StateName, State) ->
     %% Throw out messages we don't care about, but log them
     lager:error("Unrecognized message ~p", [Message]),
-    {noreply, State, 0}.
+    {next_state, StateName, State, 0}.
 
 
 %% @doc The gen_server terminate/2 callback, called when shutting down
 %% the server.
--spec terminate(Reason, State) -> ok when
+-spec terminate(Reason, StateName, State) -> ok when
       Reason :: normal | shutdown | {shutdown,term()} | term(),
+      StateName :: atom(),
       State :: #state{}.
-terminate(_Reason, _State) ->
+terminate(_Reason, _StateName, _State) ->
     ok.
 
 %% @doc The gen_server code_change/3 callback, called when performing
 %% a hot code upgrade on the server. Currently unused.
--spec code_change(OldVsn, State, Extra) -> {ok, State} | {error, Reason} when
+-spec code_change(OldVsn, StateName, State, Extra) -> {ok, State} | {error, Reason} when
       OldVsn :: Vsn | {down, Vsn},
       Vsn :: term(),
+      StateName :: atom(),
       State :: #state{},
       Extra :: term(),
       Reason :: term().
-code_change(_OldVsn,State,_Extra) ->
+code_change(_OldVsn, _StateName, State, _Extra) ->
     {ok, State}.
 
 %% ===================================================================
 %% Internal functions
 %% ===================================================================
 
-decode_buffer(State=#state{socket=Socket,
-                           inbuffer=Buffer}) ->
+decode_buffer(StateName, State=#state{socket=Socket,
+                                      transport=Transport,
+                                      inbuffer=Buffer}) ->
     case erlang:decode_packet(4, Buffer, []) of
         {ok, <<MsgCode:8, MsgData/binary>>, Rest} ->
-            case handle_message(MsgCode, MsgData, State) of
-                {ok, NewState} ->
-                    decode_buffer(NewState#state{inbuffer=Rest});
+            case ?MODULE:StateName({msg, MsgCode, MsgData}, State) of
+                {next_state, NewStateName, NewState} ->
+                    decode_buffer(NewStateName, NewState#state{inbuffer=Rest});
                 Stop ->
                     Stop
             end;
@@ -179,40 +366,12 @@ decode_buffer(State=#state{socket=Socket,
             lager:error("Unexpected message format! Message: ~p, Rest: ~p", [Binary, Rest]),
             {stop, badmessage, State};
         {more, _Length} ->
-            inet:setopts(Socket, [{active, once}]),
-            {noreply, State, 0};
+            Transport:setopts(Socket, [{active, once}]),
+            {next_state, StateName, State, 0};
         {error, Reason} ->
             FState = send_error_and_flush({format, "Invalid message packet, reason: ~p", [Reason]},
                                           State#state{inbuffer= <<>>}),
-            {noreply, FState, 0}
-    end.
-
-handle_message(MsgCode, MsgData, State=#state{states=ServiceStates}) ->
-    try
-        %% First find the appropriate service module to dispatch
-        NewState = case riak_api_pb_registrar:lookup(MsgCode) of
-            {ok, Service} ->
-                %% Decode the message according to the service
-                case Service:decode(MsgCode, MsgData) of
-                    {ok, Message} ->
-                        %% Process the message
-                        ServiceState = orddict:fetch(Service, ServiceStates),
-                        process_message(Service, Message, ServiceState, State);
-                    {error, Reason} ->
-                        send_error("Message decoding error: ~p", [Reason], State)
-                end;
-            error ->
-                send_error(io_lib:format("Unknown message code: ~p",
-                                         [MsgCode]), State)
-        end,
-        {ok, NewState}
-    catch
-        %% Tell the client we errored before closing the connection.
-        Type:Failure ->
-            Trace = erlang:get_stacktrace(),
-            FState = send_error_and_flush({format, "Error processing incoming message: ~p:~p:~p",
-                                           [Type, Failure, Trace]}, State),
-            {stop, {Type, Failure, Trace}, FState}
+            {next_state, StateName, FState, 0}
     end.
 
 
@@ -347,8 +506,8 @@ send_all(Service, [Reply|Rest], State) ->
 flush([], State) ->
     %% The buffer was empty, so do a no-op.
     State;
-flush(IoData, #state{socket=Sock}=State) ->
-    gen_tcp:send(Sock, IoData),
+flush(IoData, #state{socket=Sock, transport=Transport}=State) ->
+    Transport:send(Sock, IoData),
     State.
 
 %% @doc Sends an error and immediately flushes the message buffer.
@@ -357,3 +516,8 @@ send_error_and_flush(Error, State) ->
     State1 = send_error(Error, State),
     {ok, Data, NewBuffer} = riak_api_pb_frame:flush(State1#state.outbuffer),
     flush(Data, State1#state{outbuffer=NewBuffer}).
+
+format_peername({IP, Port}) ->
+    io_lib:format("~s:~B", [inet_parse:ntoa(IP), Port]).
+
+
