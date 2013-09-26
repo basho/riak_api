@@ -106,8 +106,6 @@ setup() ->
 
 
 cleanup({L, Sup}) ->
-    %% [ application:stop(A) || A <- lists:reverse(Deps), not is_otp_base_app(A) ],
-    %% wait_for_application_shutdown(riak_api),
     exit(Sup, normal),
     application:set_env(riak_api, pb, L),
     application:stop(lager),
