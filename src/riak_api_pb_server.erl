@@ -136,6 +136,9 @@ handle_info(StreamMessage, #state{req={Service,ReqId,StreamState}}=State) ->
                                           [Type, Reason, Trace]}, State),
             {stop, {Type, Reason, Trace}, FState}
     end;
+handle_info({Ref, {ok, _RiakObj}}, State) when is_integer(Ref) ->
+    lager:info("Received late get response", []),
+    {noreply, State};
 handle_info(Message, State) ->
     %% Throw out messages we don't care about, but log them
     lager:error("Unrecognized message ~p", [Message]),
