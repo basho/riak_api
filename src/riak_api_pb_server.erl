@@ -31,6 +31,7 @@
 -endif.
 
 -include_lib("riak_pb/include/riak_pb.hrl").
+-include_lib("public_key/include/public_key.hrl").
 
 -behaviour(gen_fsm).
 
@@ -112,18 +113,20 @@ wait_for_tls({msg, MsgCode, _MsgData}, State=#state{socket=Socket,
             %% got STARTTLS msg, send ACK back to client
             Transport:send(Socket, <<1:32/unsigned-big, MsgCode:8>>),
             %% now do the SSL handshake
+            CACerts = riak_core_ssl_util:load_certs(app_helper:get_env(riak_api,
+                                                                       cacertfile)),
             case ssl:ssl_accept(Socket, [{certfile,
                                           app_helper:get_env(riak_api,
                                                                        certfile)},
                                          {keyfile, app_helper:get_env(riak_api,
                                                                       keyfile)},
-                                        {cacertfile,
-                                         app_helper:get_env(riak_api,
-                                                            cacertfile)},
+                                         {cacerts, CACerts},
                                          %% force peer validation, even though
                                          %% we don't care if the peer doesn't
-                                         %% sent a certificate
+                                         %% send a certificate
                                          {verify, verify_peer},
+                                         {verify_fun, {fun validate_function/3,
+                                                       {CACerts, []}}},
                                          {reuse_sessions, false} %% required!
                                         ]) of
                 {ok, NewSocket} ->
@@ -489,7 +492,7 @@ send_error(Message, State) when is_list(Message) orelse is_binary(Message) ->
     send_message(Packet, State).
 
 %% @doc Formats the terms with the given string and then sends an
-%% error message to the client.
+%%      error message to the client.
 -spec send_error(io:format(), list(), #state{}) -> #state{}.
 send_error(Format, Terms, State) ->
     send_error(io_lib:format(Format, Terms), State).
@@ -520,4 +523,217 @@ send_error_and_flush(Error, State) ->
 format_peername({IP, Port}) ->
     io_lib:format("~s:~B", [inet_parse:ntoa(IP), Port]).
 
+%%%
+%%% SSL callback functions and helpers
+%%%
 
+%% @doc Validator function for SSL negotiation.
+%%
+validate_function(Cert, valid_peer, State) ->
+    lager:debug("validing peer ~p with ~p intermediate certs",
+                [riak_core_ssl_util:get_common_name(Cert), 
+                 length(element(2, State))]),
+    %% peer certificate validated, now check the CRL
+    Res = (catch check_crl(Cert, State)),
+    lager:debug("CRL validate result for ~p: ~p",
+                [riak_core_ssl:get_common_name(Cert), Res]),
+    {Res, State};
+validate_function(Cert, valid, {TrustedCAs, IntermediateCerts}=State) ->
+    case public_key:pkix_is_self_signed(Cert) of
+        true ->
+            %% this is a root cert, no CRL
+            {valid, {TrustedCAs, [Cert|IntermediateCerts]}};
+        false ->
+            %% check is valid CA certificate, add to the list of
+            %% intermediates
+            Res = (catch check_crl(Cert, State)),
+            lager:debug("CRL intermediate CA validate result for ~p: ~p",
+                        [riak_core_ssl_util:get_common_name(Cert), Res]),
+            {Res, {TrustedCAs, [Cert|IntermediateCerts]}}
+    end;
+validate_function(_Cert, _Event, State) ->
+    {valid, State}.
+
+%% @doc Given a certificate, find CRL distribution points for the given
+%%      certificate, fetch, and attempt to validate each CRL through
+%%      issuer_function/4.
+%%
+check_crl(Cert, State) ->
+    %% pull the CRL distribution point(s) out of the certificate, if any
+    case pubkey_cert:select_extension(?'id-ce-cRLDistributionPoints',
+                                      pubkey_cert:extensions_list(Cert#'OTPCertificate'.tbsCertificate#'OTPTBSCertificate'.extensions)) of
+        undefined ->
+            lager:debug("no CRL distribution points for ~p",
+                         [riak_core_ssl_util:get_common_name(Cert)]),
+            %% fail; we can't validate if there's no CRL
+            no_crl;
+        CRLExtension ->
+            CRLDistPoints = CRLExtension#'Extension'.extnValue,
+            DPointsAndCRLs = lists:foldl(fun(Point, Acc) -> 
+                            %% try to read the CRL over http or from a
+                            %% local file
+                            case fetch_point(Point) of
+                                not_available ->
+                                    Acc;
+                                Res ->
+                                    [{Point, Res} | Acc]
+                            end 
+                    end, [], CRLDistPoints),
+            public_key:pkix_crls_validate(Cert, 
+                                          DPointsAndCRLs, 
+                                          [{issuer_fun, 
+                                            {fun issuer_function/4, State}}])
+    end.
+
+%% @doc Given a list of distribution points for CRLs, certificates and
+%%      both trusted and intermediary certificates, attempt to build and
+%%      authority chain back via build_chain to verify that it is valid.
+%%
+issuer_function(_DP, CRL, {_, _Issuer}, {TrustedCAs, IntermediateCerts}) ->
+    %% XXX the 'Issuer' we get passed here is actually a lie, public key treats the Authority Key Identifier as the 'issuer'
+    %% Read the CA certs out of the file
+    Certs = [public_key:pkix_decode_cert(DER, otp) || DER <- TrustedCAs],
+    %% get the real issuer out of the CRL
+    Issuer = public_key:pkix_normalize_name(
+            pubkey_cert_records:transform(
+                CRL#'CertificateList'.tbsCertList#'TBSCertList'.issuer, decode)),
+    %% assume certificates are ordered from root to tip
+    case find_issuer(Issuer, IntermediateCerts ++ Certs) of
+        undefined ->
+            lager:debug("unable to find certificate matching CRL issuer ~p", 
+                        [Issuer]),
+            error;
+        IssuerCert ->
+            case build_chain({public_key:pkix_encode('OTPCertificate', 
+                                                     IssuerCert, 
+                                                     otp), 
+                              IssuerCert}, IntermediateCerts, Certs, []) of
+                undefined ->
+                    error;
+                {OTPCert, Path} ->
+                    {ok, OTPCert, Path}
+            end
+    end.
+
+%% @doc Attempt to build authority chain back using intermediary
+%%      certificates, falling back on trusted certificates if the
+%%      intermediary chain of certificates does not fully extend to the 
+%%      root.
+%% 
+%%      Returns: {RootCA :: #OTPCertificate{}, Chain :: [der_encoded()]}
+%%
+build_chain({DER, Cert}, IntCerts, TrustedCerts, Acc) ->
+    %% check if this cert is self-signed, if it is, we've reached the
+    %% root of the chain
+    Issuer = public_key:pkix_normalize_name(
+            Cert#'OTPCertificate'.tbsCertificate#'OTPTBSCertificate'.issuer),
+    Subject = public_key:pkix_normalize_name(
+            Cert#'OTPCertificate'.tbsCertificate#'OTPTBSCertificate'.subject),
+    case Issuer == Subject of
+        true ->
+            case find_issuer(Issuer, TrustedCerts) of
+                undefined ->
+                    undefined;
+                TrustedCert ->
+                    %% return the cert from the trusted list, to prevent
+                    %% issuer spoofing
+                    {TrustedCert, 
+                     [public_key:pkix_encode(
+                                'OTPCertificate', TrustedCert, otp)|Acc]}
+            end;
+        false ->
+            Match = lists:foldl(
+                      fun(C, undefined) ->
+                              S = public_key:pkix_normalize_name(C#'OTPCertificate'.tbsCertificate#'OTPTBSCertificate'.subject),
+                              %% compare the subject to the current issuer
+                              case Issuer == S of
+                                  true ->
+                                      %% we've found our man
+                                      {public_key:pkix_encode('OTPCertificate', C, otp), C};
+                                  false ->
+                                      undefined
+                              end;
+                         (_E, A) ->
+                              %% already matched
+                              A
+                      end, undefined, IntCerts),
+            case Match of
+                undefined when IntCerts /= TrustedCerts ->
+                    %% continue the chain by using the trusted CAs
+                    lager:debug("Ran out of intermediate certs, switching to trusted certs~n"),
+                    build_chain({DER, Cert}, TrustedCerts, TrustedCerts, Acc);
+                undefined ->
+                    lager:debug("Can't construct chain of trust beyond ~p",
+                                [riak_core_ssl_util:get_common_name(Cert)]),
+                    %% can't find the current cert's issuer
+                    undefined;
+                Match ->
+                    build_chain(Match, IntCerts, TrustedCerts, [DER|Acc])
+            end
+    end.
+
+%% @doc Given a certificate and a list of trusted or intermediary
+%%      certificates, attempt to find a match in the list or bail with
+%%      undefined.
+find_issuer(Issuer, Certs) ->
+    lists:foldl(
+      fun(OTPCert, undefined) ->
+              %% check if this certificate matches the issuer
+              Normal = public_key:pkix_normalize_name(
+                        OTPCert#'OTPCertificate'.tbsCertificate#'OTPTBSCertificate'.subject),
+              case Normal == Issuer of
+                  true ->
+                      OTPCert;
+                  false ->
+                      undefined
+              end;
+         (_E, Acc) ->
+              %% already found a match
+              Acc
+      end, undefined, Certs).
+
+%% @doc Find distribution points for a given CRL and then attempt to
+%%      fetch the CRL from the first available.
+fetch_point(#'DistributionPoint'{distributionPoint={fullName, Names}}) ->
+    Decoded = [{NameType, 
+                pubkey_cert_records:transform(Name, decode)} 
+               || {NameType, Name} <- Names],
+    fetch(Decoded).
+
+%% @doc Given a list of locations to retrieve a CRL from, attempt to
+%%      retrieve either from a file or http resource and bail as soon as
+%%      it can be found.
+%%
+%%      Currently, only hand a armored PEM or DER encoded file, with
+%%      defaulting to DER.
+%%
+fetch([]) ->
+    not_available;
+fetch([{uniformResourceIdentifier, "file://"++_File}|Rest]) ->
+    lager:debug("fetching CRLs from file URIs is not supported"),
+    fetch(Rest);
+fetch([{uniformResourceIdentifier, "http"++_=URL}|Rest]) ->
+    lager:debug("getting CRL from ~p~n", [URL]),
+    _ = inets:start(),
+    case httpc:request(get, {URL, []}, [], [{body_format, binary}]) of
+        {ok, {_Status, _Headers, Body}} ->
+            case Body of
+                <<"-----BEGIN", _/binary>> ->
+                    [{'CertificateList', 
+                      DER, _}=CertList] = public_key:pem_decode(Body),
+                    {DER, public_key:pem_entry_decode(CertList)};
+                _ ->
+                    %% assume DER encoded
+                    CertList = public_key:pem_entry_decode(
+                            {'CertificateList', Body, not_encrypted}),
+                    {Body, CertList}
+            end;
+        {error, _Reason} ->
+            lager:debug("failed to get CRL ~p~n", [_Reason]),
+            fetch(Rest)
+    end;
+fetch([Loc|Rest]) ->
+    %% unsupported CRL location
+    lager:debug("unable to fetch CRL from unsupported location ~p", 
+                [Loc]),
+    fetch(Rest).
