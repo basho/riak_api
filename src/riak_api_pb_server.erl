@@ -589,8 +589,9 @@ check_crl(Cert, State) ->
 %%      both trusted and intermediary certificates, attempt to build and
 %%      authority chain back via build_chain to verify that it is valid.
 %%
-issuer_function(_DP, CRL, {_, _Issuer}, {TrustedCAs, IntermediateCerts}) ->
-    %% XXX the 'Issuer' we get passed here is actually a lie, public key treats the Authority Key Identifier as the 'issuer'
+issuer_function(_DP, CRL, _Issuer, {TrustedCAs, IntermediateCerts}) ->
+    %% XXX the 'Issuer' we get passed here is the AuthorityKeyIdentifier,
+    %% which we are not currently smart enough to understand
     %% Read the CA certs out of the file
     Certs = [public_key:pkix_decode_cert(DER, otp) || DER <- TrustedCAs],
     %% get the real issuer out of the CRL
