@@ -43,7 +43,9 @@
   {commented, 128}
 ]}.
 
-%% @doc 
+%% @doc Turns off Nagle's algorithm (aka TCP slow-start) 
+%% for Protocol Buffers connections. This is equivalent 
+%% to setting the TCP_NODELAY option on the socket. 
 {mapping, "protobuf.nagle", "riak_api.disable_pb_nagle", [
   {datatype, {enum, [on, off]}},
   {default, off},
