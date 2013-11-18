@@ -11,7 +11,8 @@ basic_schema_test() ->
     cuttlefish_unit:assert_config(Config, "riak_api.http", [{"127.0.0.1", 8098}]),
     cuttlefish_unit:assert_config(Config, "riak_api.pb", [{"127.0.0.1", 8087}]),
     cuttlefish_unit:assert_config(Config, "riak_api.https", undefined),
-    cuttlefish_unit:assert_config(Config, "protobuf.backlog", undefined),
+    cuttlefish_unit:assert_config(Config, "riak_api.pb_backlog", 128),
+    cuttlefish_unit:assert_config(Config, "riak_api.disable_pb_nagle", true),
     ok.
 
 override_schema_test() ->
@@ -24,7 +25,8 @@ override_schema_test() ->
         {["listener", "protobuf", "external"], "127.0.0.9:3000"},
         {["listener", "https", "internal"], "127.0.0.12:443"},
         {["listener", "https", "external"], "127.0.0.13:443"},
-        {["protobuf", "backlog"], 64}
+        {["protobuf", "backlog"], 64},
+        {["protobuf", "nagle"], on}
     ],
     Config = cuttlefish_unit:generate_templated_config("../priv/riak_api.schema", Conf, context()),
 
@@ -33,6 +35,7 @@ override_schema_test() ->
     cuttlefish_unit:assert_config(Config, "riak_api.pb", [{"127.0.0.9", 3000}, {"127.0.0.8", 3000}]),
     cuttlefish_unit:assert_config(Config, "riak_api.https", [{"127.0.0.13", 443}, {"127.0.0.12", 443}]),
     cuttlefish_unit:assert_config(Config, "riak_api.pb_backlog", 64),
+    cuttlefish_unit:assert_config(Config, "riak_api.disable_pb_nagle", false),
     ok.
 
 %% this context() represents the substitution variables that rebar will use during the build process.

@@ -39,8 +39,30 @@
 %% higher.
 {mapping, "protobuf.backlog", "riak_api.pb_backlog", [
   {datatype, integer},
-  {commented, 64}
+  {default, 128},
+  {commented, 128}
 ]}.
+
+%% @doc Turns off Nagle's algorithm (aka TCP slow-start) 
+%% for Protocol Buffers connections. This is equivalent 
+%% to setting the TCP_NODELAY option on the socket. 
+{mapping, "protobuf.nagle", "riak_api.disable_pb_nagle", [
+  {datatype, {enum, [on, off]}},
+  {default, off},
+  {level, advanced}
+]}.
+
+{ translation, 
+  "riak_api.disable_pb_nagle", 
+  fun(Conf) ->
+    Nagle = cuttlefish_util:conf_get_value("protobuf.nagle", Conf), 
+    case Nagle of
+      off -> true;
+      on -> false;
+      _ -> true
+    end
+  end
+}.
 
 %% @doc listener.https.<name> is an IP address and TCP port that the Riak
 %% HTTPS interface will bind.
