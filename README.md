@@ -17,9 +17,9 @@ We encourage contributions to `riak_api` from the community.
    the repository.
 
     ```
-    git clone git@github.com:yourusername/riak_kv.git
+    git clone git@github.com:yourusername/riak_api.git
     # or
-    git remote add mine git@github.com:yourusername/riak_kv.git
+    git remote add mine git@github.com:yourusername/riak_api.git
     ```
 
 3. Create a topic branch for your change.
