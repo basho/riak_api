@@ -36,7 +36,7 @@
 -behaviour(gen_fsm).
 
 %% API
--export([start_link/0, set_socket/2]).
+-export([start_link/0, set_socket/2, service_registered/2]).
 
 %% States
 -export([wait_for_socket/2, wait_for_socket/3, wait_for_tls/2, wait_for_tls/3,
@@ -74,6 +74,11 @@ start_link() ->
 -spec set_socket(pid(), port()) -> ok.
 set_socket(Pid, Socket) ->
     gen_fsm:sync_send_event(Pid, {set_socket, Socket}, infinity).
+
+%% @doc Notifies the server process of a newly registered PB service.
+-spec service_registered(pid(), module()) -> ok.
+service_registered(Pid, Mod) ->
+    gen_fsm:send_all_state_event(Pid, {registered, Mod}).
 
 %% @doc The gen_server init/1 callback, initializes the
 %% riak_api_pb_server.
