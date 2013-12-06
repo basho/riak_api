@@ -136,7 +136,12 @@ wait_for_tls({msg, MsgCode, _MsgData}, State=#state{socket=Socket,
                                          {verify_fun, {fun validate_function/3,
                                                        {CACerts, []}}},
                                          {reuse_sessions, false} %% required!
-                                        ]) of
+                                        ] ++
+                                        %% conditionally include the honor cipher order, don't pass it if it
+                                        %% disabled because it will crash unpatched OTP
+                                        [{honor_cipher_order, true} ||
+                                         app_helper:get_env(riak_api, honor_cipher_order, false) ]
+                               ) of
                 {ok, NewSocket} ->
                     CommonName = case ssl:peercert(NewSocket) of
                         {ok, Cert} ->

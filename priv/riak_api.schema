@@ -80,3 +80,26 @@
         [ IP || {_, IP} <- HTTPS]
     end
 }.
+
+%% @doc Whether or not to honor the order in which the server lists its
+%% preferred ciphers.
+{mapping, "honor_cipher_order", "riak_api.honor_cipher_order", [
+  {datatype, {enum, [on, off]}},
+  {default, on}
+]}.
+
+{translation,
+  "riak_api.honor_cipher_order",
+   fun(Conf) ->
+     OTPVer = erlang:system_info(otp_release),
+     CipherOrder = cuttlefish_util:conf_get_value("honor_cipher_order", Conf),
+     %% This is only available, as of December 2013, in basho patched R16B02,
+     %% so disable it if the VM is not patched by basho. This can be revised
+     %% for R17, when this patch is expected to be present mainline.
+     case {CipherOrder, string:str(OTPVer, "basho")} of
+       {_, 0} -> false;
+       {on, _} -> true;
+       {off, _} -> false
+     end
+   end
+}.
