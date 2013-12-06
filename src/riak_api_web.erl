@@ -62,6 +62,8 @@ spec_from_binding(http, Name, {Ip, Port}) ->
 
 spec_from_binding(https, Name, {Ip, Port}) ->
     Etc = app_helper:get_env(riak_core, platform_etc_dir, "etc"),
+    {Ciphers, _} =
+        riak_core_ssl_util:parse_ciphers(riak_core_security:get_ciphers()),
     SslOpts = app_helper:get_env(riak_core, ssl,
                                  [{certfile, filename:join(Etc, "cert.pem")},
                                   {keyfile, filename:join(Etc, "key.pem")}]),
@@ -69,7 +71,7 @@ spec_from_binding(https, Name, {Ip, Port}) ->
                    {ip, Ip},
                    {port, Port},
                    {ssl, true},
-                   {ssl_opts, SslOpts},
+                   {ssl_opts, SslOpts ++ [{ciphers, Ciphers}]},
                    {nodelay, true}],
                   common_config()).
 

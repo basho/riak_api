@@ -120,12 +120,15 @@ wait_for_tls({msg, MsgCode, _MsgData}, State=#state{socket=Socket,
             %% now do the SSL handshake
             CACerts = riak_core_ssl_util:load_certs(app_helper:get_env(riak_api,
                                                                        cacertfile)),
+            {Ciphers, _} =
+                riak_core_ssl_util:parse_ciphers(riak_core_security:get_ciphers()),
             case ssl:ssl_accept(Socket, [{certfile,
                                           app_helper:get_env(riak_api,
                                                                        certfile)},
                                          {keyfile, app_helper:get_env(riak_api,
                                                                       keyfile)},
                                          {cacerts, CACerts},
+                                         {ciphers, Ciphers},
                                          %% force peer validation, even though
                                          %% we don't care if the peer doesn't
                                          %% send a certificate
