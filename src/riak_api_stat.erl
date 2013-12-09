@@ -105,6 +105,7 @@ active_pb_connects(_) ->
     %% riak_api_pb_sup will not be running when there are no listeners
     %% defined.
     case erlang:whereis(riak_api_pb_sup) of
-        undefined -> 0;
-        _ -> proplists:get_value(active, supervisor:count_children(riak_api_pb_sup))
+        undefined -> [{value, 0}];
+        _ ->
+	    [{value, proplists:get_value(active, supervisor:count_children(riak_api_pb_sup), 0)}]
     end.
