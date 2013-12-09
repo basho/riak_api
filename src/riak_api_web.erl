@@ -67,11 +67,16 @@ spec_from_binding(https, Name, {Ip, Port}) ->
     SslOpts = app_helper:get_env(riak_core, ssl,
                                  [{certfile, filename:join(Etc, "cert.pem")},
                                   {keyfile, filename:join(Etc, "key.pem")}]) 
-        %% conditionally include the honor cipher order, don't pass it if it
+        %% Conditionally include the honor cipher order, don't pass it if it
         %% disabled because it will crash unpatched OTP
         ++ [{honor_cipher_order, true} ||
             app_helper:get_env(riak_api, honor_cipher_order, false) ]
-        ++ [{ciphers, Ciphers}],
+        ++ [{ciphers, Ciphers},
+            {versions,
+             app_helper:get_env(riak_api,
+                                tls_protocols,
+                                ['tlsv1.2'])}
+           ],
 
     lists:flatten([{name, Name},
                    {ip, Ip},

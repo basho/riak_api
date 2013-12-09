@@ -129,18 +129,27 @@ wait_for_tls({msg, MsgCode, _MsgData}, State=#state{socket=Socket,
                                                                       keyfile)},
                                          {cacerts, CACerts},
                                          {ciphers, Ciphers},
+                                         {versions,
+                                          app_helper:get_env(riak_api,
+                                                             tls_protocols,
+                                                             ['tlsv1.2'])},
                                          %% force peer validation, even though
                                          %% we don't care if the peer doesn't
                                          %% send a certificate
                                          {verify, verify_peer},
-                                         {verify_fun, {fun validate_function/3,
-                                                       {CACerts, []}}},
                                          {reuse_sessions, false} %% required!
                                         ] ++
                                         %% conditionally include the honor cipher order, don't pass it if it
                                         %% disabled because it will crash unpatched OTP
                                         [{honor_cipher_order, true} ||
-                                         app_helper:get_env(riak_api, honor_cipher_order, false) ]
+                                         app_helper:get_env(riak_api,
+                                                            honor_cipher_order,
+                                                            false) ] ++
+                                        [{verify_fun, {fun validate_function/3,
+                                                       {CACerts, []}}} ||
+                                         app_helper:get_env(riak_api,
+                                                            check_crl, false)]
+
                                ) of
                 {ok, NewSocket} ->
                     CommonName = case ssl:peercert(NewSocket) of
