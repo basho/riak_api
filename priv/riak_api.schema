@@ -1,3 +1,4 @@
+%%-*- mode: erlang -*-
 %% HTTP Listeners
 %% @doc listener.http.<name> is an IP address and TCP port that the Riak
 %% HTTP interface will bind.
@@ -10,13 +11,13 @@
 { translation,
   "riak_api.http",
     fun(Conf) ->
-        HTTP = cuttlefish_util:filter_by_variable_starts_with("listener.http", Conf),
+        HTTP = cuttlefish_variable:filter_by_prefix("listener.http", Conf),
         [ IP || {_, IP} <- HTTP]
     end
 }.
 
 %% protobuf Listeners
-%% @doc listener.protobuf.<name> is an IP address and TCP port that the Riak 
+%% @doc listener.protobuf.<name> is an IP address and TCP port that the Riak
 %% Protocol Buffers interface will bind.
 {mapping, "listener.protobuf.$name", "riak_api.pb", [
   {default, "{{pb_ip}}:{{pb_port}}"},
@@ -27,7 +28,7 @@
 { translation,
   "riak_api.pb",
     fun(Conf) ->
-        PB = cuttlefish_util:filter_by_variable_starts_with("listener.protobuf", Conf),
+        PB = cuttlefish_variable:filter_by_prefix("listener.protobuf", Conf),
         [ IP || {_, IP} <- PB]
     end
 }.
@@ -43,19 +44,19 @@
   {commented, 128}
 ]}.
 
-%% @doc Turns off Nagle's algorithm (aka TCP slow-start) 
-%% for Protocol Buffers connections. This is equivalent 
-%% to setting the TCP_NODELAY option on the socket. 
+%% @doc Turns off Nagle's algorithm (aka TCP slow-start)
+%% for Protocol Buffers connections. This is equivalent
+%% to setting the TCP_NODELAY option on the socket.
 {mapping, "protobuf.nagle", "riak_api.disable_pb_nagle", [
   {datatype, {enum, [on, off]}},
   {default, off},
   {level, advanced}
 ]}.
 
-{ translation, 
-  "riak_api.disable_pb_nagle", 
+{ translation,
+  "riak_api.disable_pb_nagle",
   fun(Conf) ->
-    Nagle = cuttlefish_util:conf_get_value("protobuf.nagle", Conf), 
+    Nagle = cuttlefish:conf_get("protobuf.nagle", Conf),
     case Nagle of
       off -> true;
       on -> false;
@@ -75,7 +76,7 @@
 { translation,
   "riak_api.https",
     fun(Conf) ->
-        HTTPS = cuttlefish_util:filter_by_variable_starts_with("listener.https", Conf),
+        HTTPS = cuttlefish_variable:filter_by_prefix("listener.https", Conf),
         [ IP || {_, IP} <- HTTPS]
     end
 }.
