@@ -46,7 +46,7 @@
          terminate/3, code_change/4]).
 
 -record(state, {
-          transport = ranch_tcp :: 'ranch_tcp' | 'ranch_ssl',
+          transport = {gen_tcp, inet} :: {module(), module()},
           socket :: port(),   % socket
           req,                % current request
           states :: orddict:orddict(),    % per-service connection state
@@ -90,9 +90,9 @@ init([]) ->
 wait_for_socket(_Event, State) ->
     {next_state, wait_for_socket, State}.
 
-wait_for_socket({set_socket, Socket}, _From, State=#state{transport=Transport}) ->
-    {ok, PeerInfo} = Transport:peername(Socket),
-    Transport:setopts(Socket, [{active, once}]),
+wait_for_socket({set_socket, Socket}, _From, State=#state{transport={_Transport,Control}}) ->
+    {ok, PeerInfo} = Control:peername(Socket),
+    Control:setopts(Socket, [{active, once}]),
     %% check if security is enabled, if it is wait for TLS, otherwise go
     %% straight into connected state
     case riak_core_security:is_enabled() of
@@ -107,7 +107,7 @@ wait_for_socket(_Event, _From, State) ->
     {reply, unknown_message, wait_for_socket, State}.
 
 wait_for_tls({msg, MsgCode, _MsgData}, State=#state{socket=Socket,
-                                                    transport=Transport}) ->
+                                                    transport={Transport, _Control}}) ->
     case riak_pb_codec:msg_code(rpbstarttls) of
         MsgCode ->
             %% got STARTTLS msg, send ACK back to client
@@ -140,7 +140,7 @@ wait_for_tls({msg, MsgCode, _MsgData}, State=#state{socket=Socket,
                     lager:debug("STARTTLS succeeded, peer's common name was ~p",
                                [CommonName]),
                     {next_state, wait_for_auth,
-                     State#state{socket=NewSocket, common_name=CommonName, transport=ranch_ssl}};
+                     State#state{socket=NewSocket, common_name=CommonName, transport={ssl,ssl}}};
                 {error, Reason} ->
                     lager:warning("STARTTLS with client ~s failed: ~p",
                                   [format_peername(State#state.peername), Reason]),
@@ -159,7 +159,7 @@ wait_for_tls(_Event, _From, State) ->
     {reply, unknown_message, wait_for_tls, State}.
 
 wait_for_auth({msg, MsgCode, MsgData}, State=#state{socket=Socket,
-                                                    transport=Transport}) ->
+                                                    transport={Transport,_Control}}) ->
     case riak_pb_codec:msg_code(rpbauthreq) of
         MsgCode ->
             %% got AUTH message, try to validate credentials
@@ -355,7 +355,7 @@ code_change(_OldVsn, _StateName, State, _Extra) ->
 %% ===================================================================
 
 decode_buffer(StateName, State=#state{socket=Socket,
-                                      transport=Transport,
+                                      transport={_Transport,Control},
                                       inbuffer=Buffer}) ->
     case erlang:decode_packet(4, Buffer, []) of
         {ok, <<MsgCode:8, MsgData/binary>>, Rest} ->
@@ -369,7 +369,7 @@ decode_buffer(StateName, State=#state{socket=Socket,
             lager:error("Unexpected message format! Message: ~p, Rest: ~p", [Binary, Rest]),
             {stop, badmessage, State};
         {more, _Length} ->
-            Transport:setopts(Socket, [{active, once}]),
+            Control:setopts(Socket, [{active, once}]),
             {next_state, StateName, State, 0};
         {error, Reason} ->
             FState = send_error_and_flush({format, "Invalid message packet, reason: ~p", [Reason]},
@@ -509,7 +509,7 @@ send_all(Service, [Reply|Rest], State) ->
 flush([], State) ->
     %% The buffer was empty, so do a no-op.
     State;
-flush(IoData, #state{socket=Sock, transport=Transport}=State) ->
+flush(IoData, #state{socket=Sock, transport={Transport,_Control}}=State) ->
     Transport:send(Sock, IoData),
     State.
 
