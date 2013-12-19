@@ -20,14 +20,13 @@
 %%
 %% -------------------------------------------------------------------
 
-%% @doc <p>The Bucket type PB service for Riak Core. This is included in
-%% the Riak API application because of startup-time constraints. This
-%% service covers the following request messages:</p>
+%% @doc <p>The Bucket type PB service for Riak Core. This is included
+%% in the Riak API application because of startup-time constraints.
+%% This service covers the following request messages:</p>
 %%
 %% <pre>
-%% 19 - RpbGetBucketTypeReq
-%% 21 - RpbSetBucketTypeReq
-%% 29 - RpbResetBucketTypeReq
+%% 31 - RpbGetBucketTypeReq
+%% 32 - RpbSetBucketTypeReq
 %% </pre>
 %%
 %% @end
@@ -47,15 +46,12 @@ init() ->
     undefined.
 
 %% @doc decode/2 callback. Decodes an incoming message.
-decode(Code, Bin) when Code == 31; Code == 32; Code == 33 ->
+decode(Code, Bin) when Code == 31; Code == 32 ->
     Msg = riak_pb_codec:decode(Code, Bin),
     case Msg of
         #rpbgetbuckettypereq{type=T} ->
             {ok, Msg, {"riak_core.get_bucket_type", T}};
         #rpbsetbuckettypereq{type=T} ->
-            {ok, Msg, {"riak_core.set_bucket_type", T}};
-        #rpbresetbuckettypereq{type=T} ->
-            %% reset is a fancy set
             {ok, Msg, {"riak_core.set_bucket_type", T}}
     end.
 
@@ -63,7 +59,7 @@ decode(Code, Bin) when Code == 31; Code == 32; Code == 33 ->
 encode(Message) ->
     {ok, riak_pb_codec:encode(Message)}.
 
-%% Get bucket properties
+%% Get bucket type properties
 process(#rpbgetbuckettypereq{type = T}, State) ->
     case riak_core_bucket_type:get(T) of
         undefined ->
@@ -73,7 +69,7 @@ process(#rpbgetbuckettypereq{type = T}, State) ->
             {reply, #rpbgetbucketresp{props = PbProps}, State}
     end;
 
-%% Set bucket properties
+%% Set bucket type properties
 process(#rpbsetbuckettypereq{type = T, props = PbProps}, State) ->
     Props = riak_pb_codec:decode_bucket_props(PbProps),
     case riak_core_bucket_type:update(T, Props) of
@@ -81,15 +77,6 @@ process(#rpbsetbuckettypereq{type = T, props = PbProps}, State) ->
             {reply, rpbsetbucketresp, State};
         {error, Details} ->
             {error, {format, "Invalid bucket properties: ~p", [Details]}, State}
-    end;
-
-%% Reset bucket properties
-process(#rpbresetbuckettypereq{type = T}, State) ->
-    case riak_core_bucket_type:reset(T) of
-        ok ->
-            {reply, rpbresetbucketresp, State};
-        _ ->
-            {error, {format, "Invalid bucket type: ~p", [T]}, State}
     end.
 
 process_stream(_, _, State) ->
