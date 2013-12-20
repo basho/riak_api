@@ -68,7 +68,8 @@ spec_from_binding(https, Name, {Ip, Port}) ->
                                  [{certfile, filename:join(Etc, "cert.pem")},
                                   {keyfile, filename:join(Etc, "key.pem")}]) 
         %% Conditionally include the honor cipher order, don't pass it if it
-        %% disabled because it will crash unpatched OTP
+        %% disabled because it will crash any OTP installs that lack the patch
+        %% to implement honor_cipher_order.
         ++ [{honor_cipher_order, true} ||
             app_helper:get_env(riak_api, honor_cipher_order, false) ]
         ++ [{ciphers, Ciphers},

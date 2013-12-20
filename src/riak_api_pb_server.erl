@@ -140,11 +140,15 @@ wait_for_tls({msg, MsgCode, _MsgData}, State=#state{socket=Socket,
                                          {reuse_sessions, false} %% required!
                                         ] ++
                                         %% conditionally include the honor cipher order, don't pass it if it
-                                        %% disabled because it will crash unpatched OTP
+                                        %% disabled because it will crash any
+                                        %% OTP installs that lack the patch to
+                                        %% implement honor_cipher_order
                                         [{honor_cipher_order, true} ||
                                          app_helper:get_env(riak_api,
                                                             honor_cipher_order,
                                                             false) ] ++
+                                        %% if we're validating CRLs, define a
+                                        %% verify_fun for them.
                                         [{verify_fun, {fun validate_function/3,
                                                        {CACerts, []}}} ||
                                          app_helper:get_env(riak_api,
