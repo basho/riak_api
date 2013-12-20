@@ -80,3 +80,103 @@
         [ IP || {_, IP} <- HTTPS]
     end
 }.
+
+%% @doc Whether or not to honor the order in which the server lists its
+%% preferred ciphers.
+{mapping, "honor_cipher_order", "riak_api.honor_cipher_order", [
+  {datatype, {enum, [on, off]}},
+  {default, on}
+]}.
+
+{translation,
+  "riak_api.honor_cipher_order",
+   fun(Conf) ->
+     OTPVer = erlang:system_info(otp_release),
+     CipherOrder = cuttlefish_util:conf_get_value("honor_cipher_order", Conf),
+     %% This is only available, as of December 2013, in basho patched R16B02,
+     %% so disable it if the VM is not patched by basho. This can be revised
+     %% for R17, when this patch is expected to be present mainline.
+     %% The basho patched OTP can be found at:
+     %% https://github.com/basho/otp/tree/OTP_R16B02_basho3
+     case {CipherOrder, string:str(OTPVer, "basho")} of
+       {_, 0} -> false;
+       {on, _} -> true;
+       {off, _} -> false
+     end
+   end
+}.
+
+%% @doc Determine which SSL/TLS versions are allowed. By default only TLS 1.2
+%% is allowed, but other versions can be enabled if clients don't support the
+%% latest TLS standard. It is *strongly* recommended that SSLv3 is not enabled
+%% unless absolutely necessary. More than one protocol can be enabled at once.
+{mapping, "tls_protocols.sslv3", "riak_api.tls_protocols", [
+  {datatype, {enum, [on, off]}},
+  {default, off}
+]}.
+
+%% @see tls_protocols.sslv3
+{mapping, "tls_protocols.tlsv1", "riak_api.tls_protocols", [
+  {datatype, {enum, [on, off]}},
+  {default, off}
+]}.
+
+
+%% @see tls_protocols.sslv3
+{mapping, "tls_protocols.tlsv1.1", "riak_api.tls_protocols", [
+  {datatype, {enum, [on, off]}},
+  {default, off}
+]}.
+
+%% @see tls_protocols.sslv3
+{mapping, "tls_protocols.tlsv1.2", "riak_api.tls_protocols", [
+  {datatype, {enum, [on, off]}},
+  {default, on}
+]}.
+
+{ translation,
+  "riak_api.tls_protocols",
+    fun(Conf) ->
+        Protocols = cuttlefish_util:filter_by_variable_starts_with("tls_protocols", Conf),
+        [begin
+             case Key of
+                 ["tls_protocols","sslv3"] ->
+                     sslv3;
+                 ["tls_protocols","tlsv1"] ->
+                     tlsv1;
+                 ["tls_protocols","tlsv1", "1"] ->
+                     'tlsv1.1';
+                 ["tls_protocols","tlsv1", "2"] ->
+                     'tlsv1.2'
+             end
+         end
+         || {Key, Value} <- Protocols, Value == on]
+    end
+}.
+
+%% @doc Whether to check the CRL of a client certificate. This defaults to
+%% true but some CAs may not maintain or define a CRL, so this can be disabled
+%% if no CRL is available.
+{mapping, "check_crl", "riak_api.check_crl", [
+  {datatype, {enum, [on, off]}},
+  {default, on}
+]}.
+
+{translation,
+  "riak_api.check_crl",
+   fun(Conf) ->
+     OTPVer = erlang:system_info(otp_release),
+     CheckCRL = cuttlefish_util:conf_get_value("check_crl", Conf),
+     %% CRL checking is broken in mainline OTP as of R16B02, so Riak will ship
+     %% with a patched SSL/public_key to fix it. This means that we don't want
+     %% to pass this option to a vanilla OTP.
+     %% The basho patched OTP can be found at:
+     %% https://github.com/basho/otp/tree/OTP_R16B02_basho3
+     case {CheckCRL, string:str(OTPVer, "basho")} of
+       {_, 0} -> false;
+       {on, _} -> true;
+       {off, _} -> false
+     end
+   end
+}.
+

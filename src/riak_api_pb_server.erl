@@ -120,20 +120,41 @@ wait_for_tls({msg, MsgCode, _MsgData}, State=#state{socket=Socket,
             %% now do the SSL handshake
             CACerts = riak_core_ssl_util:load_certs(app_helper:get_env(riak_api,
                                                                        cacertfile)),
+            {Ciphers, _} =
+                riak_core_ssl_util:parse_ciphers(riak_core_security:get_ciphers()),
             case ssl:ssl_accept(Socket, [{certfile,
                                           app_helper:get_env(riak_api,
                                                                        certfile)},
                                          {keyfile, app_helper:get_env(riak_api,
                                                                       keyfile)},
                                          {cacerts, CACerts},
+                                         {ciphers, Ciphers},
+                                         {versions,
+                                          app_helper:get_env(riak_api,
+                                                             tls_protocols,
+                                                             ['tlsv1.2'])},
                                          %% force peer validation, even though
                                          %% we don't care if the peer doesn't
                                          %% send a certificate
                                          {verify, verify_peer},
-                                         {verify_fun, {fun validate_function/3,
-                                                       {CACerts, []}}},
                                          {reuse_sessions, false} %% required!
-                                        ]) of
+                                        ] ++
+                                        %% conditionally include the honor cipher order, don't pass it if it
+                                        %% disabled because it will crash any
+                                        %% OTP installs that lack the patch to
+                                        %% implement honor_cipher_order
+                                        [{honor_cipher_order, true} ||
+                                         app_helper:get_env(riak_api,
+                                                            honor_cipher_order,
+                                                            false) ] ++
+                                        %% if we're validating CRLs, define a
+                                        %% verify_fun for them.
+                                        [{verify_fun, {fun validate_function/3,
+                                                       {CACerts, []}}} ||
+                                         app_helper:get_env(riak_api,
+                                                            check_crl, false)]
+
+                               ) of
                 {ok, NewSocket} ->
                     CommonName = case ssl:peercert(NewSocket) of
                         {ok, Cert} ->
