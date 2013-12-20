@@ -68,7 +68,7 @@ get_stats() ->
 
 get_stats_legacy() ->
     case riak_core_stat_cache:get_stats(?APP) of
-        {ok, Stats} ->
+        {ok, Stats, _TS} ->
             Stats;
         Error -> Error
     end.
