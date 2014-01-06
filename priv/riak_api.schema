@@ -53,22 +53,10 @@
 %% connections. This is equivalent to setting the TCP_NODELAY option
 %% on the socket.
 {mapping, "protobuf.nagle", "riak_api.disable_pb_nagle", [
-  {datatype, {enum, [on, off]}},
+  {datatype, {flag, off, on}},
   {default, off},
   {level, advanced}
 ]}.
-
-{translation,
- "riak_api.disable_pb_nagle",
- fun(Conf) ->
-    Nagle = cuttlefish:conf_get("protobuf.nagle", Conf),
-    case Nagle of
-      off -> true;
-      on -> false;
-      _ -> true
-    end
- end
-}.
 
 %% @doc listener.https.<name> is an IP address and TCP port that the Riak
 %% HTTPS interface will bind.

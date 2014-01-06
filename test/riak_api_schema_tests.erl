@@ -7,12 +7,14 @@
 basic_schema_test() ->
      %% The defaults are defined in ../priv/riak_api.schema. it is the file under test.
     Config = cuttlefish_unit:generate_templated_config("../priv/riak_api.schema", [], context()),
-
     cuttlefish_unit:assert_config(Config, "riak_api.http", []),
     cuttlefish_unit:assert_config(Config, "riak_api.pb", []),
     cuttlefish_unit:assert_not_configured(Config, "riak_api.https"),
     cuttlefish_unit:assert_config(Config, "riak_api.pb_backlog", 128),
     cuttlefish_unit:assert_config(Config, "riak_api.disable_pb_nagle", true),
+    cuttlefish_unit:assert_config(Config, "riak_api.honor_cipher_order", basho_vm(true, false)),
+    cuttlefish_unit:assert_config(Config, "riak_api.tls_protocols", ['tlsv1.2']),
+    cuttlefish_unit:assert_config(Config, "riak_api.check_crl", basho_vm(true, false)),
     ok.
 
 override_schema_test() ->
@@ -26,7 +28,13 @@ override_schema_test() ->
         {["listener", "https", "internal"], "127.0.0.12:443"},
         {["listener", "https", "external"], "127.0.0.13:443"},
         {["protobuf", "backlog"], 64},
-        {["protobuf", "nagle"], on}
+        {["protobuf", "nagle"], on},
+        {["honor_cipher_order"], off},
+        {["tls_protocols", "sslv3"], on},
+        {["tls_protocols", "tlsv1"], on},
+        {["tls_protocols", "tlsv1", "1"], on},
+        {["tls_protocols", "tlsv1", "2"], off},
+        {["check_crl"], off}
     ],
     Config = cuttlefish_unit:generate_templated_config("../priv/riak_api.schema", Conf, context()),
 
@@ -36,12 +44,16 @@ override_schema_test() ->
     cuttlefish_unit:assert_config(Config, "riak_api.https", [{"127.0.0.13", 443}, {"127.0.0.12", 443}]),
     cuttlefish_unit:assert_config(Config, "riak_api.pb_backlog", 64),
     cuttlefish_unit:assert_config(Config, "riak_api.disable_pb_nagle", false),
+    cuttlefish_unit:assert_config(Config, "riak_api.tls_protocols", ['tlsv1.1', tlsv1, sslv3]),
+    cuttlefish_unit:assert_config(Config, "riak_api.check_crl", false),
     ok.
 
-%% this context() represents the substitution variables that rebar will use during the build process.
-%% riak_core's schema file is written with some {{mustache_vars}} for substitution during packaging
-%% cuttlefish doesn't have a great time parsing those, so we perform the substitutions first, because
-%% that's how it would work in real life.
+%% this context() represents the substitution variables that rebar
+%% will use during the build process.  riak_core's schema file is
+%% written with some {{mustache_vars}} for substitution during
+%% packaging cuttlefish doesn't have a great time parsing those, so we
+%% perform the substitutions first, because that's how it would work
+%% in real life.
 context() ->
     [
         {web_ip, "127.0.0.1"},
@@ -49,3 +61,10 @@ context() ->
         {pb_ip, "127.0.0.1"},
         {pb_port, 8087}
     ].
+
+basho_vm(ExpectedIfBasho, ExpectedIfNot) ->
+    OTPVer = erlang:system_info(otp_release),
+    case string:str(OTPVer, "basho") of
+        0 -> ExpectedIfNot;
+        _ -> ExpectedIfBasho
+    end.
