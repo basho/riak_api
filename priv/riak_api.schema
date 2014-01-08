@@ -8,62 +8,55 @@
   {include_default, "internal"}
 ]}.
 
-{ translation,
-  "riak_api.http",
-    fun(Conf) ->
-        HTTP = cuttlefish_variable:filter_by_prefix("listener.http", Conf),
-        [ IP || {_, IP} <- HTTP]
-    end
+{translation,
+ "riak_api.http",
+  fun(Conf) ->
+      HTTP = cuttlefish_variable:filter_by_prefix("listener.http", Conf),
+      [ IP || {_, IP} <- HTTP]
+  end
 }.
 
-%% protobuf Listeners
 %% @doc listener.protobuf.<name> is an IP address and TCP port that the Riak
 %% Protocol Buffers interface will bind.
 {mapping, "listener.protobuf.$name", "riak_api.pb", [
-  {default, "{{pb_ip}}:{{pb_port}}"},
+  {default, {"{{pb_ip}}",{{pb_port}} }},
   {datatype, ip},
   {include_default, "internal"}
 ]}.
 
-{ translation,
-  "riak_api.pb",
-    fun(Conf) ->
-        PB = cuttlefish_variable:filter_by_prefix("listener.protobuf", Conf),
-        [ IP || {_, IP} <- PB]
-    end
+{translation,
+ "riak_api.pb",
+ fun(Conf) ->
+     PB = cuttlefish_variable:filter_by_prefix("listener.protobuf", Conf),
+     [ IP || {_, IP} <- PB]
+ end
 }.
 
-%% @doc pb_backlog is the maximum length to which the queue of pending
-%% connections may grow. If set, it must be an integer >= 0.
-%% By default the value is 5. If you anticipate a huge number of
-%% connections being initialised *simultaneously*, set this number
+%% @doc The maximum length to which the queue of pending
+%% connections may grow. If set, it must be an integer > 0.  By
+%% default the value is 5. If you anticipate a huge number of
+%% connections being initialized *simultaneously*, set this number
 %% higher.
 {mapping, "protobuf.backlog", "riak_api.pb_backlog", [
   {datatype, integer},
   {default, 128},
-  {commented, 128}
+  {commented, 128},
+  {validators, ["greater_than_zero"]}
 ]}.
 
-%% @doc Turns off Nagle's algorithm (aka TCP slow-start)
-%% for Protocol Buffers connections. This is equivalent
-%% to setting the TCP_NODELAY option on the socket.
+{validator,
+ "greater_than_zero",
+ "must be greater than zero",
+ fun(Value) -> Value > 0 end}.
+
+%% @doc Turns off Nagle's algorithm for Protocol Buffers
+%% connections. This is equivalent to setting the TCP_NODELAY option
+%% on the socket.
 {mapping, "protobuf.nagle", "riak_api.disable_pb_nagle", [
-  {datatype, {enum, [on, off]}},
+  {datatype, {flag, off, on}},
   {default, off},
   {level, advanced}
 ]}.
-
-{ translation,
-  "riak_api.disable_pb_nagle",
-  fun(Conf) ->
-    Nagle = cuttlefish:conf_get("protobuf.nagle", Conf),
-    case Nagle of
-      off -> true;
-      on -> false;
-      _ -> true
-    end
-  end
-}.
 
 %% @doc listener.https.<name> is an IP address and TCP port that the Riak
 %% HTTPS interface will bind.
@@ -73,26 +66,28 @@
   {include_default, "internal"}
 ]}.
 
-{ translation,
-  "riak_api.https",
-    fun(Conf) ->
-        HTTPS = cuttlefish_variable:filter_by_prefix("listener.https", Conf),
-        [ IP || {_, IP} <- HTTPS]
-    end
+{translation,
+ "riak_api.https",
+ fun(Conf) ->
+     HTTPS = cuttlefish_variable:filter_by_prefix("listener.https", Conf),
+     [ IP || {_, IP} <- HTTPS]
+ end
 }.
 
-%% @doc Whether or not to honor the order in which the server lists its
-%% preferred ciphers.
+%% @doc Whether to prefer the order in which the server lists its
+%% ciphers. When set to 'off', the client's preferred cipher order
+%% dictates which cipher is chosen.
 {mapping, "honor_cipher_order", "riak_api.honor_cipher_order", [
   {datatype, {enum, [on, off]}},
-  {default, on}
+  {default, on},
+  {level, advanced}
 ]}.
 
 {translation,
   "riak_api.honor_cipher_order",
    fun(Conf) ->
      OTPVer = erlang:system_info(otp_release),
-     CipherOrder = cuttlefish_util:conf_get_value("honor_cipher_order", Conf),
+     CipherOrder = cuttlefish:conf_get("honor_cipher_order", Conf),
      %% This is only available, as of December 2013, in basho patched R16B02,
      %% so disable it if the VM is not patched by basho. This can be revised
      %% for R17, when this patch is expected to be present mainline.
@@ -112,61 +107,65 @@
 %% unless absolutely necessary. More than one protocol can be enabled at once.
 {mapping, "tls_protocols.sslv3", "riak_api.tls_protocols", [
   {datatype, {enum, [on, off]}},
-  {default, off}
+  {default, off},
+  {level, advanced}
 ]}.
 
 %% @see tls_protocols.sslv3
 {mapping, "tls_protocols.tlsv1", "riak_api.tls_protocols", [
   {datatype, {enum, [on, off]}},
-  {default, off}
+  {default, off},
+  {level, advanced}
 ]}.
 
 
 %% @see tls_protocols.sslv3
 {mapping, "tls_protocols.tlsv1.1", "riak_api.tls_protocols", [
   {datatype, {enum, [on, off]}},
-  {default, off}
+  {default, off},
+  {level, advanced}
 ]}.
 
 %% @see tls_protocols.sslv3
 {mapping, "tls_protocols.tlsv1.2", "riak_api.tls_protocols", [
   {datatype, {enum, [on, off]}},
-  {default, on}
-]}.
-
-{ translation,
-  "riak_api.tls_protocols",
-    fun(Conf) ->
-        Protocols = cuttlefish_util:filter_by_variable_starts_with("tls_protocols", Conf),
-        [begin
-             case Key of
-                 ["tls_protocols","sslv3"] ->
-                     sslv3;
-                 ["tls_protocols","tlsv1"] ->
-                     tlsv1;
-                 ["tls_protocols","tlsv1", "1"] ->
-                     'tlsv1.1';
-                 ["tls_protocols","tlsv1", "2"] ->
-                     'tlsv1.2'
-             end
-         end
-         || {Key, Value} <- Protocols, Value == on]
-    end
-}.
-
-%% @doc Whether to check the CRL of a client certificate. This defaults to
-%% true but some CAs may not maintain or define a CRL, so this can be disabled
-%% if no CRL is available.
-{mapping, "check_crl", "riak_api.check_crl", [
-  {datatype, {enum, [on, off]}},
-  {default, on}
+  {default, on},
+  {level, advanced}
 ]}.
 
 {translation,
-  "riak_api.check_crl",
-   fun(Conf) ->
+ "riak_api.tls_protocols",
+ fun(Conf) ->
+    Protocols = cuttlefish_util:filter_by_variable_starts_with("tls_protocols", Conf),
+    [begin
+         case Key of
+             ["tls_protocols","sslv3"] ->
+                 sslv3;
+             ["tls_protocols","tlsv1"] ->
+                 tlsv1;
+             ["tls_protocols","tlsv1", "1"] ->
+                 'tlsv1.1';
+             ["tls_protocols","tlsv1", "2"] ->
+                 'tlsv1.2'
+         end
+     end || {Key, Value} <- Protocols, Value == on]
+ end
+}.
+
+%% @doc Whether to check the CRL of a client certificate. This defaults to
+%% on but some CAs may not maintain or define a CRL, so this can be disabled
+%% if no CRL is available.
+{mapping, "check_crl", "riak_api.check_crl", [
+  {datatype, {enum, [on, off]}},
+  {default, on},
+  {level, advanced}
+]}.
+
+{translation,
+ "riak_api.check_crl",
+ fun(Conf) ->
      OTPVer = erlang:system_info(otp_release),
-     CheckCRL = cuttlefish_util:conf_get_value("check_crl", Conf),
+     CheckCRL = cuttlefish:conf_get("check_crl", Conf),
      %% CRL checking is broken in mainline OTP as of R16B02, so Riak will ship
      %% with a patched SSL/public_key to fix it. This means that we don't want
      %% to pass this option to a vanilla OTP.
@@ -177,6 +176,5 @@
        {on, _} -> true;
        {off, _} -> false
      end
-   end
+ end
 }.
-
