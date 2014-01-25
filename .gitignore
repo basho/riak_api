@@ -5,3 +5,4 @@ priv/*
 *.beam
 doc
 ebin
+.local_dialyzer_plt
