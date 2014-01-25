@@ -158,9 +158,6 @@
 -module(riak_api_pb_service).
 -compile([{no_auto_import, [register/2]}]).
 
-%% Behaviour API
--export([behaviour_info/1]).
-
 %% Service-provider API
 -export([register/1,
          register/2,
@@ -174,16 +171,33 @@
 
 -export_type([registration/0]).
 
-%% @doc Behaviour information callback. PB API services must implement
-%% the given functions.
-behaviour_info(callbacks) ->
-    [{init,0},
-     {decode,2},
-     {encode,1},
-     {process,2},
-     {process_stream,3}];
-behaviour_info(_) ->
-    undefined.
+-callback init() -> State :: term().
+
+-type perm_and_target() :: {Permission :: string(), Target :: term()}.
+-callback decode(Code :: non_neg_integer(), Message :: binary()) ->
+    {ok, DecodedMessage :: term()} |
+    {ok, DecodedMessage :: term(), perm_and_target()} |
+    {error, Reason :: term()}.
+
+-callback encode(Message :: term()) ->
+    {ok, EncodedMessage :: iodata()} |
+    term().
+
+-type process_error() :: iodata() |
+                         {format, term()} |
+                         {format, io:format(), [term()]}.
+
+-callback process(Message :: term(), State :: term()) ->
+    {reply, ReplyMessage :: term(), NewState :: term()} |
+    {reply, {stream, ReqId :: term()}, NewState :: term()} |
+    {error, Error :: process_error(), NewState :: term()}.
+
+-callback process_stream(Message :: term(), ReqId :: term(), State :: term()) ->
+    {reply, Reply :: [term()] | term(), NewState :: term()} |
+    {ignore, NewState :: term()} |
+    {done, Reply :: [term()] | term(), NewState :: term()} |
+    {done, NewState :: term()} |
+    {error, Error :: process_error(), NewState :: term()}.
 
 %% @doc Registers a number of services at once.
 %% @see register/3
