@@ -63,19 +63,23 @@
 %% ```
 %% decode(Code, Message) ->
 %%     {ok, DecodedMessage} |
+%%     {ok, DecodedMessage, PermAndTarget} |
 %%     {error, Reason}.
 %%
 %%     Code = non_neg_integer()
 %%     Message = binary()
 %%     DecodedMessage = Reason = term()
+%%     PermAndTarget = {string(), term()}
 %% '''
 %%
 %% The `decode/2' callback is handed a message code and wire message
 %% that is registered to this service and should decode it into an
 %% Erlang term that can be handled by the `process/2' callback. If the
 %% message does not decode properly, it should return an `error' tuple
-%% with an appropriate reason. Most services will simply delegate
-%% encoding to the `riak_pb' application.
+%% with an appropriate reason. The decoded message may optionally
+%% include a permission and target tuple used by the security system
+%% to restrict access to the operation.  Most services will simply
+%% delegate encoding to the `riak_pb' application.
 %%
 %% ```
 %% encode(Message) ->
