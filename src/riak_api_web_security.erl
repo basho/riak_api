@@ -1,8 +1,7 @@
+%% @doc Some security helper functions for Riak API endpoints
 -module(riak_api_web_security).
 
 -export([is_authorized/1]).
-
-%% @doc Some security helper functions for Riak API endpoints
 
 %% @doc Check if the user is authorized
 -spec is_authorized(any()) -> {true, any()} | false | insecure.
