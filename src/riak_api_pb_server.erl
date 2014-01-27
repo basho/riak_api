@@ -96,17 +96,25 @@ wait_for_socket(_Event, State) ->
     {next_state, wait_for_socket, State}.
 
 wait_for_socket({set_socket, Socket}, _From, State=#state{transport={_Transport,Control}}) ->
-    {ok, PeerInfo} = Control:peername(Socket),
-    Control:setopts(Socket, [{active, once}]),
-    %% check if security is enabled, if it is wait for TLS, otherwise go
-    %% straight into connected state
-    case riak_core_security:is_enabled() of
-        true ->
-            {reply, ok, wait_for_tls, State#state{socket=Socket,
-                                                  peername=PeerInfo}};
-        false ->
-            {reply, ok, connected, State#state{socket=Socket,
-                                               peername=PeerInfo}}
+    case Control:peername(Socket) of
+        {ok, PeerInfo} ->
+            Control:setopts(Socket, [{active, once}]),
+            %% check if security is enabled, if it is wait for TLS, otherwise go
+            %% straight into connected state
+            case riak_core_security:is_enabled() of
+                true ->
+                    {reply, ok, wait_for_tls, State#state{socket=Socket,
+                                                          peername=PeerInfo}};
+                false ->
+                    {reply, ok, connected, State#state{socket=Socket,
+                                                       peername=PeerInfo}}
+            end;
+        {error, Reason} ->
+            lager:debug("Could not get PB socket peername: ~p", [Reason]),
+            %% It's not really "ok", but there's no reason for the
+            %% listener to crash just because this socket had an
+            %% error. See riak_api#54.
+            {stop, normal, ok, State}
     end;
 wait_for_socket(_Event, _From, State) ->
     {reply, unknown_message, wait_for_socket, State}.
@@ -764,3 +772,38 @@ fetch([Loc|Rest]) ->
     lager:debug("unable to fetch CRL from unsupported location ~p", 
                 [Loc]),
     fetch(Rest).
+
+-ifdef(TEST).
+
+-include("riak_api_pb_registrar.hrl").
+
+receive_closed_socket_test() ->
+    %% Create the registration table so the server will start up.
+    ets:new(?ETS_NAME, ?ETS_OPTS),
+
+    %% Pretend that we're a listener, listen on any port
+
+    {ok, Server} = start_link(),
+    {ok, Listen} = gen_tcp:listen(0, []),
+    {ok, {Address, Port}} = inet:sockname(Listen),
+
+    %% Connect as a client
+    {ok, ClientSocket} = gen_tcp:connect(Address, Port, []),
+
+    %% Accept the socket, give it over to the server, then have the
+    %% client close the socket.
+    {ok, ServerSocket} = gen_tcp:accept(Listen),
+    ok = gen_tcp:controlling_process(ServerSocket, Server),
+    ok = gen_tcp:close(ClientSocket),
+    timer:sleep(1),
+
+    %% The call to set_socket should reply ok, but shutdown the
+    %% server, not crash and propagate back to the listener process.
+    ?assertEqual(ok, set_socket(Server, ServerSocket)),
+    ?assertNot(erlang:is_process_alive(Server)),
+
+    %% Close the listening socket
+    gen_tcp:close(Listen),
+    ets:delete(?ETS_NAME).
+
+-endif.
