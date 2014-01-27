@@ -565,7 +565,7 @@ format_peername({IP, Port}) ->
 %%
 validate_function(Cert, valid_peer, State) ->
     lager:debug("validing peer ~p with ~p intermediate certs",
-                [riak_core_ssl_util:get_common_name(Cert), 
+                [riak_core_ssl_util:get_common_name(Cert),
                  length(element(2, State))]),
     %% peer certificate validated, now check the CRL
     Res = (catch check_crl(Cert, State)),
@@ -603,7 +603,7 @@ check_crl(Cert, State) ->
             no_crl;
         CRLExtension ->
             CRLDistPoints = CRLExtension#'Extension'.extnValue,
-            DPointsAndCRLs = lists:foldl(fun(Point, Acc) -> 
+            DPointsAndCRLs = lists:foldl(fun(Point, Acc) ->
                             %% try to read the CRL over http or from a
                             %% local file
                             case fetch_point(Point) of
@@ -611,11 +611,11 @@ check_crl(Cert, State) ->
                                     Acc;
                                 Res ->
                                     [{Point, Res} | Acc]
-                            end 
+                            end
                     end, [], CRLDistPoints),
-            public_key:pkix_crls_validate(Cert, 
-                                          DPointsAndCRLs, 
-                                          [{issuer_fun, 
+            public_key:pkix_crls_validate(Cert,
+                                          DPointsAndCRLs,
+                                          [{issuer_fun,
                                             {fun issuer_function/4, State}}])
     end.
 
@@ -635,13 +635,13 @@ issuer_function(_DP, CRL, _Issuer, {TrustedCAs, IntermediateCerts}) ->
     %% assume certificates are ordered from root to tip
     case find_issuer(Issuer, IntermediateCerts ++ Certs) of
         undefined ->
-            lager:debug("unable to find certificate matching CRL issuer ~p", 
+            lager:debug("unable to find certificate matching CRL issuer ~p",
                         [Issuer]),
             error;
         IssuerCert ->
-            case build_chain({public_key:pkix_encode('OTPCertificate', 
-                                                     IssuerCert, 
-                                                     otp), 
+            case build_chain({public_key:pkix_encode('OTPCertificate',
+                                                     IssuerCert,
+                                                     otp),
                               IssuerCert}, IntermediateCerts, Certs, []) of
                 undefined ->
                     error;
@@ -652,9 +652,9 @@ issuer_function(_DP, CRL, _Issuer, {TrustedCAs, IntermediateCerts}) ->
 
 %% @doc Attempt to build authority chain back using intermediary
 %%      certificates, falling back on trusted certificates if the
-%%      intermediary chain of certificates does not fully extend to the 
+%%      intermediary chain of certificates does not fully extend to the
 %%      root.
-%% 
+%%
 %%      Returns: {RootCA :: #OTPCertificate{}, Chain :: [der_encoded()]}
 %%
 build_chain({DER, Cert}, IntCerts, TrustedCerts, Acc) ->
@@ -672,7 +672,7 @@ build_chain({DER, Cert}, IntCerts, TrustedCerts, Acc) ->
                 TrustedCert ->
                     %% return the cert from the trusted list, to prevent
                     %% issuer spoofing
-                    {TrustedCert, 
+                    {TrustedCert,
                      [public_key:pkix_encode(
                                 'OTPCertificate', TrustedCert, otp)|Acc]}
             end;
@@ -730,8 +730,8 @@ find_issuer(Issuer, Certs) ->
 %% @doc Find distribution points for a given CRL and then attempt to
 %%      fetch the CRL from the first available.
 fetch_point(#'DistributionPoint'{distributionPoint={fullName, Names}}) ->
-    Decoded = [{NameType, 
-                pubkey_cert_records:transform(Name, decode)} 
+    Decoded = [{NameType,
+                pubkey_cert_records:transform(Name, decode)}
                || {NameType, Name} <- Names],
     fetch(Decoded).
 
@@ -754,7 +754,7 @@ fetch([{uniformResourceIdentifier, "http"++_=URL}|Rest]) ->
         {ok, {_Status, _Headers, Body}} ->
             case Body of
                 <<"-----BEGIN", _/binary>> ->
-                    [{'CertificateList', 
+                    [{'CertificateList',
                       DER, _}=CertList] = public_key:pem_decode(Body),
                     {DER, public_key:pem_entry_decode(CertList)};
                 _ ->
@@ -769,7 +769,7 @@ fetch([{uniformResourceIdentifier, "http"++_=URL}|Rest]) ->
     end;
 fetch([Loc|Rest]) ->
     %% unsupported CRL location
-    lager:debug("unable to fetch CRL from unsupported location ~p", 
+    lager:debug("unable to fetch CRL from unsupported location ~p",
                 [Loc]),
     fetch(Rest).
 
