@@ -47,7 +47,7 @@
 
 -record(state, {
           transport = {gen_tcp, inet} :: {module(), module()},
-          socket :: port(),   % socket
+          socket :: port() | ssl:sslsocket(),   % socket
           req,                % current request
           states :: orddict:orddict(),    % per-service connection state
           peername :: undefined | {inet:ip_address(), pos_integer()},
@@ -82,7 +82,7 @@ service_registered(Pid, Mod) ->
 
 %% @doc The gen_server init/1 callback, initializes the
 %% riak_api_pb_server.
--spec init(list()) -> {ok, #state{}}.
+-spec init(list()) -> {ok, wait_for_socket, #state{}}.
 init([]) ->
     riak_api_stat:update(pbc_connect),
     ServiceStates = lists:foldl(fun(Service, States) ->
@@ -374,15 +374,14 @@ terminate(_Reason, _StateName, _State) ->
 
 %% @doc The gen_server code_change/3 callback, called when performing
 %% a hot code upgrade on the server. Currently unused.
--spec code_change(OldVsn, StateName, State, Extra) -> {ok, State} | {error, Reason} when
+-spec code_change(OldVsn, StateName, State, Extra) -> {ok, StateName, State} when
       OldVsn :: Vsn | {down, Vsn},
       Vsn :: term(),
       StateName :: atom(),
       State :: #state{},
-      Extra :: term(),
-      Reason :: term().
-code_change(_OldVsn, _StateName, State, _Extra) ->
-    {ok, State}.
+      Extra :: term().
+code_change(_OldVsn, StateName, State, _Extra) ->
+    {ok, StateName, State}.
 
 %% ===================================================================
 %% Internal functions
