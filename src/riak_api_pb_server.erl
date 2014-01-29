@@ -562,7 +562,7 @@ validate_function(Cert, valid_peer, State) ->
     %% peer certificate validated, now check the CRL
     Res = (catch check_crl(Cert, State)),
     lager:debug("CRL validate result for ~p: ~p",
-                [riak_core_ssl:get_common_name(Cert), Res]),
+                [riak_core_ssl_util:get_common_name(Cert), Res]),
     {Res, State};
 validate_function(Cert, valid, {TrustedCAs, IntermediateCerts}=State) ->
     case public_key:pkix_is_self_signed(Cert) of
