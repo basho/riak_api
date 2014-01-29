@@ -46,7 +46,7 @@
          terminate/3, code_change/4]).
 
 -record(state, {
-          transport = {gen_tcp, inet} :: {module(), module()},
+          transport = {gen_tcp, inet} :: {gen_tcp, inet} | {ssl, ssl},
           socket :: port() | ssl:sslsocket(),   % socket
           req,                % current request
           states :: orddict:orddict(),    % per-service connection state
