@@ -776,33 +776,51 @@ fetch([Loc|Rest]) ->
 
 -include("riak_api_pb_registrar.hrl").
 
-receive_closed_socket_test() ->
-    %% Create the registration table so the server will start up.
-    ets:new(?ETS_NAME, ?ETS_OPTS),
+receive_closed_socket_test_() ->
+    {setup,
+     fun() ->
+             %% Create the registration table so the server will start up.
+             try ets:new(?ETS_NAME, ?ETS_OPTS) of
+                 ?ETS_NAME -> true
+             catch
+                 _:badarg -> false
+             end
+     end,
+     fun(true) -> ets:delete(?ETS_NAME);
+        (_) -> ok
+     end,
+     ?_test(
+        begin
+            %% Pretend that we're a listener, listen on any port
+            {ok, Listen} = gen_tcp:listen(0, []),
+            {ok, {Address, Port}} = inet:sockname(Listen),
 
-    %% Pretend that we're a listener, listen on any port
+            %% Connect as a client
+            {ok, ClientSocket} = gen_tcp:connect(Address, Port, []),
 
-    {ok, Server} = start_link(),
-    {ok, Listen} = gen_tcp:listen(0, []),
-    {ok, {Address, Port}} = inet:sockname(Listen),
+            %% Accept the socket, start a server, give it over to the server,
+            %% then have the client close the socket.
+            {ok, ServerSocket} = gen_tcp:accept(Listen),
+            {ok, Server} = gen_fsm:start(?MODULE, [], []),
+            MRef = monitor(process, Server),
+            ok = gen_tcp:controlling_process(ServerSocket, Server),
+            ok = gen_tcp:close(ClientSocket),
+            timer:sleep(1),
 
-    %% Connect as a client
-    {ok, ClientSocket} = gen_tcp:connect(Address, Port, []),
+            %% The call to set_socket should reply ok, but shutdown the
+            %% server, not crash and propagate back to the listener process.
+            ?assertEqual(ok, set_socket(Server, ServerSocket)),
+            receive
+                {'DOWN', MRef, process, Server, _} -> ok
+            after 5000 ->
+                    %% We shouldn't miss the DOWN message, but let's
+                    %% just check that the process is stopped now.
+                    ?assertNot(erlang:is_process_alive(Server))
+            end,
 
-    %% Accept the socket, give it over to the server, then have the
-    %% client close the socket.
-    {ok, ServerSocket} = gen_tcp:accept(Listen),
-    ok = gen_tcp:controlling_process(ServerSocket, Server),
-    ok = gen_tcp:close(ClientSocket),
-    timer:sleep(1),
-
-    %% The call to set_socket should reply ok, but shutdown the
-    %% server, not crash and propagate back to the listener process.
-    ?assertEqual(ok, set_socket(Server, ServerSocket)),
-    ?assertNot(erlang:is_process_alive(Server)),
-
-    %% Close the listening socket
-    gen_tcp:close(Listen),
-    ets:delete(?ETS_NAME).
+            %% Close the listening socket
+            gen_tcp:close(Listen)
+        end
+       )}.
 
 -endif.
