@@ -69,7 +69,7 @@
 %%     Code = non_neg_integer()
 %%     Message = binary()
 %%     DecodedMessage = Reason = term()
-%%     PermAndTarget = {string(), term()}
+%%     PermAndTarget = perm_and_target()
 %% '''
 %%
 %% The `decode/2' callback is handed a message code and wire message
