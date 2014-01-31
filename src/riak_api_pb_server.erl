@@ -46,8 +46,8 @@
          terminate/3, code_change/4]).
 
 -record(state, {
-          transport = {gen_tcp, inet} :: {module(), module()},
-          socket :: port(),   % socket
+          transport = {gen_tcp, inet} :: {gen_tcp, inet} | {ssl, ssl},
+          socket :: port() | ssl:sslsocket(),   % socket
           req,                % current request
           states :: orddict:orddict(),    % per-service connection state
           peername :: undefined | {inet:ip_address(), pos_integer()},
@@ -82,7 +82,7 @@ service_registered(Pid, Mod) ->
 
 %% @doc The gen_server init/1 callback, initializes the
 %% riak_api_pb_server.
--spec init(list()) -> {ok, #state{}}.
+-spec init(list()) -> {ok, wait_for_socket, #state{}}.
 init([]) ->
     riak_api_stat:update(pbc_connect),
     ServiceStates = lists:foldl(fun(Service, States) ->
@@ -96,17 +96,25 @@ wait_for_socket(_Event, State) ->
     {next_state, wait_for_socket, State}.
 
 wait_for_socket({set_socket, Socket}, _From, State=#state{transport={_Transport,Control}}) ->
-    {ok, PeerInfo} = Control:peername(Socket),
-    Control:setopts(Socket, [{active, once}]),
-    %% check if security is enabled, if it is wait for TLS, otherwise go
-    %% straight into connected state
-    case riak_core_security:is_enabled() of
-        true ->
-            {reply, ok, wait_for_tls, State#state{socket=Socket,
-                                                  peername=PeerInfo}};
-        false ->
-            {reply, ok, connected, State#state{socket=Socket,
-                                               peername=PeerInfo}}
+    case Control:peername(Socket) of
+        {ok, PeerInfo} ->
+            Control:setopts(Socket, [{active, once}]),
+            %% check if security is enabled, if it is wait for TLS, otherwise go
+            %% straight into connected state
+            case riak_core_security:is_enabled() of
+                true ->
+                    {reply, ok, wait_for_tls, State#state{socket=Socket,
+                                                          peername=PeerInfo}};
+                false ->
+                    {reply, ok, connected, State#state{socket=Socket,
+                                                       peername=PeerInfo}}
+            end;
+        {error, Reason} ->
+            lager:debug("Could not get PB socket peername: ~p", [Reason]),
+            %% It's not really "ok", but there's no reason for the
+            %% listener to crash just because this socket had an
+            %% error. See riak_api#54.
+            {stop, normal, ok, State}
     end;
 wait_for_socket(_Event, _From, State) ->
     {reply, unknown_message, wait_for_socket, State}.
@@ -366,15 +374,14 @@ terminate(_Reason, _StateName, _State) ->
 
 %% @doc The gen_server code_change/3 callback, called when performing
 %% a hot code upgrade on the server. Currently unused.
--spec code_change(OldVsn, StateName, State, Extra) -> {ok, State} | {error, Reason} when
+-spec code_change(OldVsn, StateName, State, Extra) -> {ok, StateName, State} when
       OldVsn :: Vsn | {down, Vsn},
       Vsn :: term(),
       StateName :: atom(),
       State :: #state{},
-      Extra :: term(),
-      Reason :: term().
-code_change(_OldVsn, _StateName, State, _Extra) ->
-    {ok, State}.
+      Extra :: term().
+code_change(_OldVsn, StateName, State, _Extra) ->
+    {ok, StateName, State}.
 
 %% ===================================================================
 %% Internal functions
@@ -557,7 +564,7 @@ format_peername({IP, Port}) ->
 %%
 validate_function(Cert, valid_peer, State) ->
     lager:debug("validing peer ~p with ~p intermediate certs",
-                [riak_core_ssl_util:get_common_name(Cert), 
+                [riak_core_ssl_util:get_common_name(Cert),
                  length(element(2, State))]),
     %% peer certificate validated, now check the CRL
     Res = (catch check_crl(Cert, State)),
@@ -595,7 +602,7 @@ check_crl(Cert, State) ->
             no_crl;
         CRLExtension ->
             CRLDistPoints = CRLExtension#'Extension'.extnValue,
-            DPointsAndCRLs = lists:foldl(fun(Point, Acc) -> 
+            DPointsAndCRLs = lists:foldl(fun(Point, Acc) ->
                             %% try to read the CRL over http or from a
                             %% local file
                             case fetch_point(Point) of
@@ -603,11 +610,11 @@ check_crl(Cert, State) ->
                                     Acc;
                                 Res ->
                                     [{Point, Res} | Acc]
-                            end 
+                            end
                     end, [], CRLDistPoints),
-            public_key:pkix_crls_validate(Cert, 
-                                          DPointsAndCRLs, 
-                                          [{issuer_fun, 
+            public_key:pkix_crls_validate(Cert,
+                                          DPointsAndCRLs,
+                                          [{issuer_fun,
                                             {fun issuer_function/4, State}}])
     end.
 
@@ -627,13 +634,13 @@ issuer_function(_DP, CRL, _Issuer, {TrustedCAs, IntermediateCerts}) ->
     %% assume certificates are ordered from root to tip
     case find_issuer(Issuer, IntermediateCerts ++ Certs) of
         undefined ->
-            lager:debug("unable to find certificate matching CRL issuer ~p", 
+            lager:debug("unable to find certificate matching CRL issuer ~p",
                         [Issuer]),
             error;
         IssuerCert ->
-            case build_chain({public_key:pkix_encode('OTPCertificate', 
-                                                     IssuerCert, 
-                                                     otp), 
+            case build_chain({public_key:pkix_encode('OTPCertificate',
+                                                     IssuerCert,
+                                                     otp),
                               IssuerCert}, IntermediateCerts, Certs, []) of
                 undefined ->
                     error;
@@ -644,9 +651,9 @@ issuer_function(_DP, CRL, _Issuer, {TrustedCAs, IntermediateCerts}) ->
 
 %% @doc Attempt to build authority chain back using intermediary
 %%      certificates, falling back on trusted certificates if the
-%%      intermediary chain of certificates does not fully extend to the 
+%%      intermediary chain of certificates does not fully extend to the
 %%      root.
-%% 
+%%
 %%      Returns: {RootCA :: #OTPCertificate{}, Chain :: [der_encoded()]}
 %%
 build_chain({DER, Cert}, IntCerts, TrustedCerts, Acc) ->
@@ -664,7 +671,7 @@ build_chain({DER, Cert}, IntCerts, TrustedCerts, Acc) ->
                 TrustedCert ->
                     %% return the cert from the trusted list, to prevent
                     %% issuer spoofing
-                    {TrustedCert, 
+                    {TrustedCert,
                      [public_key:pkix_encode(
                                 'OTPCertificate', TrustedCert, otp)|Acc]}
             end;
@@ -722,8 +729,8 @@ find_issuer(Issuer, Certs) ->
 %% @doc Find distribution points for a given CRL and then attempt to
 %%      fetch the CRL from the first available.
 fetch_point(#'DistributionPoint'{distributionPoint={fullName, Names}}) ->
-    Decoded = [{NameType, 
-                pubkey_cert_records:transform(Name, decode)} 
+    Decoded = [{NameType,
+                pubkey_cert_records:transform(Name, decode)}
                || {NameType, Name} <- Names],
     fetch(Decoded).
 
@@ -746,7 +753,7 @@ fetch([{uniformResourceIdentifier, "http"++_=URL}|Rest]) ->
         {ok, {_Status, _Headers, Body}} ->
             case Body of
                 <<"-----BEGIN", _/binary>> ->
-                    [{'CertificateList', 
+                    [{'CertificateList',
                       DER, _}=CertList] = public_key:pem_decode(Body),
                     {DER, public_key:pem_entry_decode(CertList)};
                 _ ->
@@ -761,6 +768,59 @@ fetch([{uniformResourceIdentifier, "http"++_=URL}|Rest]) ->
     end;
 fetch([Loc|Rest]) ->
     %% unsupported CRL location
-    lager:debug("unable to fetch CRL from unsupported location ~p", 
+    lager:debug("unable to fetch CRL from unsupported location ~p",
                 [Loc]),
     fetch(Rest).
+
+-ifdef(TEST).
+
+-include("riak_api_pb_registrar.hrl").
+
+receive_closed_socket_test_() ->
+    {setup,
+     fun() ->
+             %% Create the registration table so the server will start up.
+             try ets:new(?ETS_NAME, ?ETS_OPTS) of
+                 ?ETS_NAME -> true
+             catch
+                 _:badarg -> false
+             end
+     end,
+     fun(true) -> ets:delete(?ETS_NAME);
+        (_) -> ok
+     end,
+     ?_test(
+        begin
+            %% Pretend that we're a listener, listen on any port
+            {ok, Listen} = gen_tcp:listen(0, []),
+            {ok, {Address, Port}} = inet:sockname(Listen),
+
+            %% Connect as a client
+            {ok, ClientSocket} = gen_tcp:connect(Address, Port, []),
+
+            %% Accept the socket, start a server, give it over to the server,
+            %% then have the client close the socket.
+            {ok, ServerSocket} = gen_tcp:accept(Listen),
+            {ok, Server} = gen_fsm:start(?MODULE, [], []),
+            MRef = monitor(process, Server),
+            ok = gen_tcp:controlling_process(ServerSocket, Server),
+            ok = gen_tcp:close(ClientSocket),
+            timer:sleep(1),
+
+            %% The call to set_socket should reply ok, but shutdown the
+            %% server, not crash and propagate back to the listener process.
+            ?assertEqual(ok, set_socket(Server, ServerSocket)),
+            receive
+                {'DOWN', MRef, process, Server, _} -> ok
+            after 5000 ->
+                    %% We shouldn't miss the DOWN message, but let's
+                    %% just check that the process is stopped now.
+                    ?assertNot(erlang:is_process_alive(Server))
+            end,
+
+            %% Close the listening socket
+            gen_tcp:close(Listen)
+        end
+       )}.
+
+-endif.
