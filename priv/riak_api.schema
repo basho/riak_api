@@ -54,7 +54,7 @@
 {mapping, "protobuf.nagle", "riak_api.disable_pb_nagle", [
   {datatype, {flag, off, on}},
   {default, off},
-  {level, advanced}
+  hidden
 ]}.
 
 %% @doc listener.https.<name> is an IP address and TCP port that the Riak
@@ -79,7 +79,7 @@
 {mapping, "honor_cipher_order", "riak_api.honor_cipher_order", [
   {datatype, {enum, [on, off]}},
   {default, on},
-  {level, advanced}
+  hidden
 ]}.
 
 {translation,
@@ -107,29 +107,28 @@
 {mapping, "tls_protocols.sslv3", "riak_api.tls_protocols", [
   {datatype, {enum, [on, off]}},
   {default, off},
-  {level, advanced}
+  hidden
 ]}.
 
 %% @see tls_protocols.sslv3
 {mapping, "tls_protocols.tlsv1", "riak_api.tls_protocols", [
   {datatype, {enum, [on, off]}},
   {default, off},
-  {level, advanced}
+  hidden
 ]}.
-
 
 %% @see tls_protocols.sslv3
 {mapping, "tls_protocols.tlsv1.1", "riak_api.tls_protocols", [
   {datatype, {enum, [on, off]}},
   {default, off},
-  {level, advanced}
+  hidden
 ]}.
 
 %% @see tls_protocols.sslv3
 {mapping, "tls_protocols.tlsv1.2", "riak_api.tls_protocols", [
   {datatype, {enum, [on, off]}},
   {default, on},
-  {level, advanced}
+  hidden
 ]}.
 
 {translation,
@@ -157,7 +156,7 @@
 {mapping, "check_crl", "riak_api.check_crl", [
   {datatype, {enum, [on, off]}},
   {default, on},
-  {level, advanced}
+  hidden
 ]}.
 
 {translation,
