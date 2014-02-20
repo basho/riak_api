@@ -134,7 +134,7 @@
 {translation,
  "riak_api.tls_protocols",
  fun(Conf) ->
-    Protocols = cuttlefish_util:filter_by_variable_starts_with("tls_protocols", Conf),
+    Protocols = cuttlefish_variable:filter_by_prefix("tls_protocols", Conf),
     [begin
          case Key of
              ["tls_protocols","sslv3"] ->
