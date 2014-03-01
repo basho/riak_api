@@ -277,7 +277,12 @@ connected({msg, MsgCode, MsgData}, State=#state{states=ServiceStates}) ->
                         send_error("Message decoding error: ~p", [Reason], State)
                 end;
             error ->
-                send_error("Unknown message code.", State)
+                case riak_pb_codec:msg_code(rpbstarttls) of
+                    MsgCode ->
+                        send_error("Security not enabled; STARTTLS not allowed.", State);
+                    _ ->
+                        send_error("Unknown message code: ~p", [MsgCode], State)
+                end
         end,
         {next_state, connected, NewState}
     catch
