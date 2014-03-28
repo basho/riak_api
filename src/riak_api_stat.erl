@@ -45,8 +45,8 @@ start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 register_stats() ->
-    [(catch folsom_metrics:delete_metric({?APP, Name})) || {Name, _Type} <- stats()],
-    [register_stat(stat_name(Stat), Type) || {Stat, Type} <- stats()],
+    _ = [(catch folsom_metrics:delete_metric({?APP, Name})) || {Name, _Type} <- stats()],
+    _ = [register_stat(stat_name(Stat), Type) || {Stat, Type} <- stats()],
     riak_core_stat_cache:register_app(?APP, {?MODULE, produce_stats, []}).
 
 %% @doc Return current aggregation of all stats.
@@ -111,7 +111,7 @@ stat_name(Name) when is_atom(Name) ->
 register_stat(Name, spiral) ->
     folsom_metrics:new_spiral(Name);
 register_stat(Name, {function, _Module, _Function}=Fun) ->
-    folsom_metrics:new_gauge(Name),
+    ok = folsom_metrics:new_gauge(Name),
     folsom_metrics:notify({Name, Fun}).
 
 active_pb_connects() ->

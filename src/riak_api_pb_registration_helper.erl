@@ -82,7 +82,7 @@ init([]) ->
         undefined ->
             %% Table does not exist, so we create the table and wait
             %% for the registrar to claim it.
-            ets:new(?ETS_NAME, ?ETS_OPTS),
+            ?ETS_NAME = ets:new(?ETS_NAME, ?ETS_OPTS),
             {ok, undefined};
         List when is_list(List) ->
             %% This process must have been restarted, because the table

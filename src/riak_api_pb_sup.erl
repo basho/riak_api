@@ -40,8 +40,8 @@ service_registered(Mod) ->
         undefined ->
             ok;
         _ ->
-            [ riak_api_pb_server:service_registered(Pid, Mod) ||
-                {_,Pid,_,_} <- supervisor:which_children(?MODULE) ],
+            _ = [ riak_api_pb_server:service_registered(Pid, Mod) ||
+                    {_,Pid,_,_} <- supervisor:which_children(?MODULE) ],
             ok
     end.
 
