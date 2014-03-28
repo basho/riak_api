@@ -226,7 +226,7 @@ do_deregister(Module, MinCode, MaxCode) ->
     case ToRemove of
         CodeRange ->
             %% All codes are valid, so remove them.
-            [ ets:delete(?ETS_NAME, Code) || Code <- CodeRange ],
+            _ = [ ets:delete(?ETS_NAME, Code) || Code <- CodeRange ],
             riak_api_pb_sup:service_registered(Module),
             ok;
         _ ->
