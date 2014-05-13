@@ -1,17 +1,34 @@
+%% -------------------------------------------------------------------
+%%
+%% riak_api_ssl: configuration for SSL/TLS connections over PB and HTTP
+%%
+%% Copyright (c) 2013-2014 Basho Technologies, Inc.  All Rights Reserved.
+%%
+%% This file is provided to you under the Apache License,
+%% Version 2.0 (the "License"); you may not use this file
+%% except in compliance with the License.  You may obtain
+%% a copy of the License at
+%%
+%%   http://www.apache.org/licenses/LICENSE-2.0
+%%
+%% Unless required by applicable law or agreed to in writing,
+%% software distributed under the License is distributed on an
+%% "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+%% KIND, either express or implied.  See the License for the
+%% specific language governing permissions and limitations
+%% under the License.
+%%
+%% -------------------------------------------------------------------
+
+%% @doc Configuration and validation routines for SSL/TLS connections
+%% to clients.
 -module(riak_api_ssl).
 
 -export([options/0]).
--include_lib("eunit/include/eunit.hrl").
-
--include_lib("riak_pb/include/riak_pb.hrl").
 -include_lib("public_key/include/public_key.hrl").
 
--include("riak_api_pb_registrar.hrl").
-
-%%%
-%%% SSL callback functions and helpers
-%%%
-
+%% @doc Returns a list of common options for SSL/TLS connections.
+-spec options() -> [ssl:ssl_option()].
 options() ->
     CoreSSL = app_helper:get_env(riak_core, ssl),
     CACertFile = proplists:get_value(cacertfile, CoreSSL),
