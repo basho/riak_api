@@ -530,9 +530,10 @@ format_peername({IP, Port}) ->
 %%%
 
 ssl_options() ->
-    CACertFile = app_helper:get_env(riak_api, cacertfile),
-    CertFile = app_helper:get_env(riak_api, certfile),
-    KeyFile = app_helper:get_env(riak_api, keyfile),
+    CoreSSL = app_helper:get_env(riak_core, ssl),
+    CACertFile = proplists:get_value(cacertfile, CoreSSL),
+    CertFile = proplists:get_value(certfile, CoreSSL),
+    KeyFile = proplists:get_value(keyfile, CoreSSL),
     Versions = app_helper:get_env(riak_api, tls_protocols, ['tlsv1.2']),
     HonorCipherOrder = app_helper:get_env(riak_api, honor_cipher_order, false),
     CheckCRL = app_helper:get_env(riak_api, check_crl, false),
