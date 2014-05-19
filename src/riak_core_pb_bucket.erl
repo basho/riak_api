@@ -76,19 +76,25 @@ encode(Message) ->
     {ok, riak_pb_codec:encode(Message)}.
 
 %% Get bucket properties
-process(#rpbgetbucketreq{type = T, bucket=B}, State) ->
+process(#rpbgetbucketreq{type=T, bucket=B}, State) ->
     Bucket = maybe_create_bucket_type(T, B),
-    Props = riak_core_bucket:get_bucket(Bucket),
-    PbProps = riak_pb_codec:encode_bucket_props(Props),
-    {reply, #rpbgetbucketresp{props = PbProps}, State};
+    case riak_core_bucket:get_bucket(Bucket) of
+        {error, no_type} ->
+            {error, {format, "No bucket-type named '~s'", [T]}, State};
+        Props ->
+            PbProps = riak_pb_codec:encode_bucket_props(Props),
+            {reply, #rpbgetbucketresp{props = PbProps}, State}
+    end;
 
 %% Set bucket properties
-process(#rpbsetbucketreq{type = T, bucket=B, props = PbProps}, State) ->
+process(#rpbsetbucketreq{type=T, bucket=B, props=PbProps}, State) ->
     Props = riak_pb_codec:decode_bucket_props(PbProps),
     Bucket = maybe_create_bucket_type(T, B),
     case riak_core_bucket:set_bucket(Bucket, Props) of
         ok ->
             {reply, rpbsetbucketresp, State};
+        {error, no_type} ->
+            {error, {format, "No bucket-type named '~s'", [T]}, State};
         {error, Details} ->
             {error, {format, "Invalid bucket properties: ~p", [Details]}, State}
     end;
