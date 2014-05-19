@@ -87,7 +87,7 @@ process(#rpbgetbucketreq{type=T, bucket=B}, State) ->
     end;
 
 %% Set bucket properties
-process(#rpbsetbucketreq{type=T, bucket=B, props = PbProps}, State) ->
+process(#rpbsetbucketreq{type=T, bucket=B, props=PbProps}, State) ->
     Props = riak_pb_codec:decode_bucket_props(PbProps),
     Bucket = maybe_create_bucket_type(T, B),
     case riak_core_bucket:set_bucket(Bucket, Props) of
