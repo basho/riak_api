@@ -183,32 +183,42 @@ simple_test_() ->
      fun cleanup/1,
      [
       %% Happy path, sync operation
-      ?_assertEqual([102|<<"ok">>], request(101, <<>>)),
+      {"happy path sync operation",
+       ?_assertEqual([102|<<"ok">>], request(101, <<>>))},
       %% Happy path, streaming operation
-      ?_assertEqual([{108, <<"foo">>},{108, <<"foo">>},{109,<<"bar">>}],
-                    request_stream(107, <<>>, fun([Code|_]) -> Code == 109 end)),
+      {"happy path streaming operation",
+       ?_assertEqual([{108, <<"foo">>},{108, <<"foo">>},{109,<<"bar">>}],
+                     request_stream(107, <<>>, fun([Code|_]) -> Code == 109 end))},
       %% Happy path, multi-message streaming
-      ?_assertEqual([{108, <<"foo">>},{108, <<"foo">>},{108, <<"foo">>}, {109,<<"bar">>}],
-                    request_stream(111, <<>>, fun([Code|_]) -> Code == 109 end)),
+      {"happy path multi-message streaming",
+       ?_assertEqual([{108, <<"foo">>},{108, <<"foo">>},{108, <<"foo">>}, {109,<<"bar">>}],
+                    request_stream(111, <<>>, fun([Code|_]) -> Code == 109 end))},
       %% Unknown request message code
-      ?_assertMatch([0|Bin] when is_binary(Bin), request(105, <<>>)),
+      {"unknown request message code",
+       ?_assertMatch([0|Bin] when is_binary(Bin), request(105, <<>>))},
       %% Undecodable request message code
-      ?_assertMatch([0|Bin] when is_binary(Bin), request(102, <<>>)),
+      {"undecodable request message code",
+       ?_assertMatch([0|Bin] when is_binary(Bin), request(102, <<>>))},
       %% Unencodable response message
-      ?_assertMatch([0|Bin] when is_binary(Bin), request(103, <<>>)),
+      {"unencodable response message",
+       ?_assertMatch([0|Bin] when is_binary(Bin), request(103, <<>>))},
       %% Internal service error
-      ?_assertMatch([0|Bin] when is_binary(Bin), request(106, <<>>)),
+      {"error response",
+       ?_assertMatch([0|Bin] when is_binary(Bin), request(106, <<>>))},
       %% Internal error with a non-zero error code
-      ?_test(begin
-                 Payload = request(112, <<>>),
-                 ?assertMatch([0|_Bin], Payload),
-                 ?assertMatch(#rpberrorresp{errcode=500}, riak_pb_codec:decode(0, tl(Payload)))
-             end),
+      {"error response with non-zero code",
+       ?_test(begin
+                  Payload = request(112, <<>>),
+                  ?assertMatch([0|_Bin], Payload),
+                  ?assertMatch(#rpberrorresp{errcode=500}, riak_pb_codec:decode(0, tl(Payload)))
+              end)},
       %% Send a message that spans multiple TCP packets
-      ?_assertMatch([108|<<"foo">>], request(99, binary:copy(<<"BIGDATA">>, 1024))),
+      {"large request message",
+       ?_assertMatch([108|<<"foo">>], request(99, binary:copy(<<"BIGDATA">>, 1024)))},
       %% Send a payload with more than one message in it
-      ?_assertMatch([[102|<<"ok">>],[102|<<"ok">>]],
-                    request_multi([{101, <<>>}, {101, <<>>}]))
+      {"multiple request messages in one frame",
+       ?_assertMatch([[102|<<"ok">>],[102|<<"ok">>]],
+                     request_multi([{101, <<>>}, {101, <<>>}]))}
      ]}.
 
 late_registration_test_() ->
