@@ -1,6 +1,7 @@
 -module(pb_service_test).
 -compile([export_all]).
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("riak_pb/include/riak_pb.hrl").
 
 %% ===================================================================
 %% Implement a dumb PB service
@@ -31,6 +32,8 @@ decode(110, _) ->
     {ok, dummyreq};
 decode(111, _) ->
     {ok, stream_multi};
+decode(112, _) ->
+    {ok, errorwithcode};
 decode(_,_) ->
     {error, unknown_message}.
 
@@ -65,6 +68,8 @@ process(stream_multi, State) ->
     {reply, {stream, Ref}, State};
 process(internalerror, State) ->
     {error, "BOOM", State};
+process(errorwithcode, State) ->
+    {error, {500, "Error with code"}, State};
 process(badresponse, State) ->
     {reply, badresponse, State};
 process(dummyreq, State) ->
@@ -105,7 +110,7 @@ setup() ->
     unlink(Sup),
     wait_for_port(),
     riak_api_pb_service:register(?MODULE, ?MSGMIN, ?MSGMAX),
-    riak_api_pb_service:register(?MODULE, 111),
+    riak_api_pb_service:register(?MODULE, 111, 112),
     {OldListeners, Sup}.
 
 
@@ -193,6 +198,12 @@ simple_test_() ->
       ?_assertMatch([0|Bin] when is_binary(Bin), request(103, <<>>)),
       %% Internal service error
       ?_assertMatch([0|Bin] when is_binary(Bin), request(106, <<>>)),
+      %% Internal error with a non-zero error code
+      ?_test(begin
+                 Payload = request(112, <<>>),
+                 ?assertMatch([0|_Bin], Payload),
+                 ?assertMatch(#rpberrorresp{errcode=500}, riak_pb_codec:decode(0, tl(Payload)))
+             end),
       %% Send a message that spans multiple TCP packets
       ?_assertMatch([108|<<"foo">>], request(99, binary:copy(<<"BIGDATA">>, 1024))),
       %% Send a payload with more than one message in it

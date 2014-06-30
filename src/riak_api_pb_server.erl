@@ -480,18 +480,22 @@ send_message(Bin, #state{outbuffer=Buffer}=State) when is_binary(Bin) orelse is_
 
 
 %% @doc Sends an error message to the client
--spec send_error(iolist() | format(), #state{}) -> #state{}.
-send_error({format, Term}, State) ->
-    send_error({format, "~p", [Term]}, State);
-send_error({format, Fmt, TList}, State) ->
-    send_error(io_lib:format(Fmt, TList), State);
-send_error(Message, State) when is_list(Message) orelse is_binary(Message) ->
-    %% TODO: provide a service for encoding error messages? While
-    %% extra work, it would follow the pattern. On the other hand,
-    %% maybe it's too much abstraction. This is a hack, allowing us
-    %% to avoid including the header file.
-    Packet = riak_pb_codec:encode({rpberrorresp, Message, 0}),
-    send_message(Packet, State).
+-spec send_error(riak_api_pb_service:process_error(), #state{}) -> #state{}.
+send_error({ErrorCode, Message}, State) when is_integer(ErrorCode) ->
+    Packet = riak_pb_codec:encode(#rpberrorresp{errmsg = format_error_message(Message),
+                                                errcode = ErrorCode}),
+    send_message(Packet, State);
+send_error(Message, State) ->
+    send_error({0, Message}, State).
+
+%% @doc Formats an error message on behalf of the service
+-spec format_error_message(riak_api_pb_service:process_error_message()) -> iodata().
+format_error_message({format, Term}) ->
+    format_error_message({format, "~p", [Term]});
+format_error_message({format, Fmt, TList}) ->
+    io_lib:format(Fmt, TList);
+format_error_message(Message) when is_list(Message) orelse is_binary(Message) ->
+    Message.
 
 %% @doc Formats the terms with the given string and then sends an
 %%      error message to the client.

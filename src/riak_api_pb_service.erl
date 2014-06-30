@@ -187,9 +187,10 @@
     {ok, EncodedMessage :: iodata()} |
     term().
 
--type process_error() :: iodata() |
-                         {format, term()} |
-                         {format, io:format(), [term()]}.
+-type process_error_message() :: iodata() |
+                                 {format, term()} |
+                                 {format, io:format(), [term()]}.
+-type process_error() :: process_error_message() | {non_neg_integer(), process_error_message()}.
 
 -callback process(Message :: term(), State :: term()) ->
     {reply, ReplyMessage :: term(), NewState :: term()} |
