@@ -45,9 +45,7 @@ start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 register_stats() ->
-    _ = [(catch folsom_metrics:delete_metric({?APP, Name})) || {Name, _Type} <- stats()],
-    _ = [register_stat(stat_name(Stat), Type) || {Stat, Type} <- stats()],
-    riak_core_stat_cache:register_app(?APP, {?MODULE, produce_stats, []}).
+    riak_core_stat:register_stats(?APP, stats()).
 
 %% @doc Return current aggregation of all stats.
 -spec get_stats() -> proplists:proplist().
@@ -91,7 +89,7 @@ code_change(_OldVsn, State, _Extra) ->
 %% @doc Update the given `Stat'.
 -spec update1(term()) -> ok.
 update1(pbc_connect) ->
-    folsom_metrics:notify_existing_metric({?APP, pbc_connects}, 1, spiral).
+    exometer:update([riak_core_stat:prefix(), ?APP, pbc_connects], 1).
 
 %% -------------------------------------------------------------------
 %% Private
@@ -100,19 +98,8 @@ stats() ->
     [
      {pbc_connects, spiral},
      {[pbc_connects, active],
-      {function, ?MODULE, active_pb_connects}}
+      {function, ?MODULE, active_pb_connects, [], value, [value]}}
     ].
-
-stat_name(Name) when is_list(Name) ->
-    list_to_tuple([?APP] ++ Name);
-stat_name(Name) when is_atom(Name) ->
-    {?APP, Name}.
-
-register_stat(Name, spiral) ->
-    folsom_metrics:new_spiral(Name);
-register_stat(Name, {function, _Module, _Function}=Fun) ->
-    ok = folsom_metrics:new_gauge(Name),
-    folsom_metrics:notify({Name, Fun}).
 
 active_pb_connects() ->
     %% riak_api_pb_sup will not be running when there are no listeners
