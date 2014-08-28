@@ -87,8 +87,10 @@ validate_function(Cert, valid, {TrustedCAs, IntermediateCerts}=State) ->
                         [riak_core_ssl_util:get_common_name(Cert), Res]),
             {Res, {TrustedCAs, [Cert|IntermediateCerts]}}
     end;
-validate_function(_Cert, _Event, State) ->
-    {valid, State}.
+validate_function(_,{bad_cert, _} = Reason, _) ->
+    {fail, Reason};
+validate_function(_,{extension, _}, UserState) ->
+    {unknown, UserState}.
 
 %% @doc Given a certificate, find CRL distribution points for the given
 %%      certificate, fetch, and attempt to validate each CRL through
