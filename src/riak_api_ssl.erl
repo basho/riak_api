@@ -103,8 +103,8 @@ check_crl(Cert, State) ->
         undefined ->
             lager:debug("no CRL distribution points for ~p",
                          [riak_core_ssl_util:get_common_name(Cert)]),
-            %% fail; we can't validate if there's no CRL
-            no_crl;
+            %% CRLs are not mandatory
+            valid;
         CRLExtension ->
             CRLDistPoints = CRLExtension#'Extension'.extnValue,
             DPointsAndCRLs = lists:foldl(fun(Point, Acc) ->
