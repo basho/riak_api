@@ -73,6 +73,22 @@
  end
 }.
 
+%% @doc events.protobuf.<name> is an IP address and UDP port (for now) on
+%% which Riak sends update events
+{mapping, "events.protobuf.$name", "riak_api.pbevents", [
+  {default, {"{{pbevents_ip}}",{{pbevents_port}} }},
+  {datatype, ip},
+  {include_default, "internal"}
+]}.
+
+{translation,
+ "riak_api.pbevents",
+ fun(Conf) ->
+     PBE = cuttlefish_variable:filter_by_prefix("events.protobuf", Conf),
+     [ IP || {_, IP} <- PBE]
+ end
+}.
+
 %% @doc Whether to prefer the order in which the server lists its
 %% ciphers. When set to 'off', the client's preferred cipher order
 %% dictates which cipher is chosen.
