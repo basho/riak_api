@@ -1,5 +1,8 @@
 .PHONY: deps
 
+EXOMETER_PACKAGES = "(basic), +afunix"
+export EXOMETER_PACKAGES
+
 all: compile
 
 deps:
