@@ -1,8 +1,5 @@
 .PHONY: deps
 
-EXOMETER_PACKAGES = "(basic)"
-export EXOMETER_PACKAGES
-
 all: compile
 
 deps:

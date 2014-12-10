@@ -93,9 +93,9 @@ update1(pbc_connect) ->
 %% -------------------------------------------------------------------
 stats() ->
     [
-     {pbc_connects, spiral},
-     {[pbc_connects, active],
-      {function, ?MODULE, active_pb_connects}}
+     {pbc_connects, spiral, [], [{one, pbc_connects},
+                                 {count, pbc_connects_total}]},
+     {[pbc_connects, active], {function, ?MODULE, active_pb_connects}, [], [{value, pbc_active}]}
     ].
 
 active_pb_connects(_) ->
