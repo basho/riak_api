@@ -48,7 +48,9 @@
          decode/2,
          encode/1,
          process/2,
-         process_stream/3]).
+         process_stream/3,
+         maybe_create_bucket_type/2,
+         bucket_type/2]).
 
 -include_lib("riak_pb/include/riak_pb.hrl").
 
