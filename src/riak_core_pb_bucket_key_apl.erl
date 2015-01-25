@@ -26,13 +26,13 @@
 %% original protocol:</p>
 %%
 %% <pre>
-%% 33 - RpbGetBucketKeyActivePreflistReq
+%% 33 - RpbGetBucketKeyPreflistReq
 %% </pre>
 %%
 %% <p>This service produces the following responses:</p>
 %%
 %% <pre>
-%% 34 - RpbGetBucketKeyActivePreflistResp
+%% 34 - RpbGetBucketKeyPreflistResp
 %% </pre>
 %%
 %% @end
@@ -55,9 +55,9 @@ init() ->
 decode(Code, Bin) when Code == 33 ->
     Msg =  riak_pb_codec:decode(Code, Bin),
     case Msg of
-        #rpbgetbucketkeyactivepreflistreq{type =T, bucket =B, key =Key} ->
+        #rpbgetbucketkeypreflistreq{type =T, bucket =B, key =Key} ->
             Bucket = riak_core_pb_bucket:bucket_type(T, B),
-            {ok, Msg, {"riak_core.get_active_preflist", {Bucket, Key}}}
+            {ok, Msg, {"riak_core.get_preflist", {Bucket, Key}}}
     end.
 
 %% @doc encode/1 callback. Encodes an outgoing response message.
@@ -65,11 +65,18 @@ encode(Message) ->
     {ok, riak_pb_codec:encode(Message)}.
 
 %% Get bucket-key preflist primaries
-process(#rpbgetbucketkeyactivepreflistreq{type=T, bucket=B, key =Key}, State) ->
-    Bucket = riak_core_pb_bucket:maybe_create_bucket_type(T, B),
-    Preflist = riak_core_apl:get_apl_ann_with_pnum({Bucket, Key}),
-    Message = riak_pb_codec:encode_apl_ann(Preflist),
-    {reply, Message, State}.
+process(#rpbgetbucketkeypreflistreq{type=T, bucket=B0, key =K}, State) ->
+    B = riak_core_pb_bucket:maybe_create_bucket_type(T, B0),
+    Preflist = riak_core_apl:get_apl_ann_with_pnum({B, K}),
+    case Preflist of
+        [] ->
+            {error, {format,
+                     "No preflist for bucket '~s' and key '~s'",
+                     [B, K]}, State};
+        P ->
+            PbPreflist = riak_pb_codec:encode_apl_ann(P),
+            {reply, #rpbgetbucketkeypreflistresp{preflist=PbPreflist}, State}
+    end.
 
 process_stream(_, _, State) ->
     {ignore, State}.
