@@ -20,73 +20,213 @@
 %%
 %% -------------------------------------------------------------------
 
+%% @doc Collect API entry point information and cache it in cluster metadata,
+%%      via an rpc call to getifaddrs/0 on some or all riak_kv nodes.
+
 -module(riak_api_lib).
--export([get_active_listener_entrypoints/1, which_eth0/0]).
+-export([get_routed_interfaces/0,
+         get_entrypoints/1,
+         get_entrypoints/2]).
+-export([metadata_get_entrypoints/2, metadata_put_entrypoints/2]).
+-export([get_entrypoints_local/1]).  %% called via rpc:call
 
 -type proto() :: http|pbc.
+-type ep() :: [{addr, inet:ip_address() | not_routed} | {port, inet:port_number()} |
+               {proto, proto()} | {last_checked, {integer(), integer(), integer()}}].
+-type get_entrypoints_options() :: [{force_update, boolean()} |
+                                    {restrict_nodes, [node()]|all}].
 
--spec get_active_listener_entrypoints(proto()) ->
-    {ExtIP::string() | none, [Port::non_neg_integer()]}.
-%% @doc Collect the ports of all pbc and http listeners set up
-%%      at this node and discover the ips bound on configured network
-%%      interfaces.  Used to provide API entry points coverage for
-%%      external clients.
-get_active_listener_entrypoints(Proto) ->
-    %% 0. collect ports
-    Ports =
+-define(EP_META_PREFIX, {api, entrypoint}).
+-define(RPC_TIMEOUT, 10000).
+
+-define(plget, proplists:get_value).
+
+
+-spec get_entrypoints(proto()) -> [{node(), ep()}] | undefined.
+%% @doc Wrapper for get_entrypoints(Proto, [{force_update, false},
+%%      {restrict_nodes, all}]).
+get_entrypoints(Proto) ->
+    get_entrypoints(Proto, [{force_update, false}, {restrict_nodes, all}]).
+
+-spec get_entrypoints(proto(), get_entrypoints_options()) -> [{node(), [ep()]}] | undefined.
+%% @doc Return (and also collect unless already cached and
+%%      'force_update' property is false) a per-node proplist with
+%%      proplists with keys: addr, port, last_checked, of pbc or http
+%%      listeners on all or some nodes.
+get_entrypoints(Proto, Options) ->
+    Nodes =
+        case ?plget(restrict_nodes, Options, all) of
+            all ->
+                riak_core_node_watcher:nodes(riak_kv);
+            Subset ->
+                Subset
+        end,
+    case ?plget(force_update, Options, false) of
+        false ->
+            case metadata_get_entrypoints(Proto, Nodes) of
+                PartialOrUndefined
+                  when PartialOrUndefined == undefined
+                       orelse length(PartialOrUndefined) /= length(Nodes) ->
+                    get_entrypoints(
+                      Proto, lists:keystore(force_update, 1, Options,
+                                            {force_update, true}));
+                FullSet ->
+                    FullSet
+            end;
+        true ->
+            {ResL, FailedNodes} =
+                rpc:multicall(
+                  Nodes, ?MODULE, get_entrypoints_local,
+                  [Proto], ?RPC_TIMEOUT),
+            case FailedNodes of
+                [] ->
+                    fine;
+                FailedNodes ->
+                    lager:log(
+                      warning, self(), "Failed to get ~p riak api listeners at node(s) ~999p",
+                      [Proto, FailedNodes])
+            end,
+            GoodNodes = Nodes -- FailedNodes,
+            metadata_put_entrypoints(
+              Proto, lists:zip(GoodNodes, flatten_one_level(ResL)))
+    end.
+
+
+-spec get_routed_interfaces() -> [{Iface::string(), inet:ip_address()}].
+%% @doc Returns the {iface, address} pairs of all non-loopback, bound
+%%      interfaces in the underlying OS.
+get_routed_interfaces() ->
+    case inet:getifaddrs() of
+        {ok, Ifaces} ->
+            lists:filtermap(
+              fun({Iface, Details}) ->
+                      case is_routed_addr(Details) of
+                          undefined ->
+                              false;
+                          Addr ->
+                              {true, {Iface, Addr}}
+                      end
+              end,
+              Ifaces);
+        {error, PosixCode} ->
+            _ = lager:log(error, self(), "Failed to enumerate network ifaces: ~p", [PosixCode]),
+            []
+    end.
+
+
+%% ===================================================================
+%% Local functions
+%% ===================================================================
+
+-spec is_routed_addr([{Ifname::string(), Ifopt::[{atom(), any()}]}]) ->
+    inet:ip_address() | undefined.
+%% @private
+is_routed_addr(Details) ->
+    Flags = ?plget(flags, Details),
+    case {(is_list(Flags) andalso
+           %% andalso lists:member(running, Flags)
+           %% iface is reported as 'running' when it's not according
+           %% to ifconfig -- why?
+           not lists:member(loopback, Flags)),
+          ?plget(addr, Details)} of
+        {true, Addr} when Addr /= undefined ->
+            Addr;
+        _ ->
+            undefined
+    end.
+
+
+-spec get_entrypoints_local(proto()) -> [ep()].
+%% @private
+%% Works locally to determine bound addresses of all active listeners.
+get_entrypoints_local(Proto) ->
+    ListenerDetails =
         case Proto of
             http ->
-                [P || {_proto, {_useless_listening_address, P}}
+                [HP || {_proto, HP = {_listening_address_as_string, _port}}
                           <- riak_api_web:get_listeners()];
             pbc ->
-                [P || {_, P} <- riak_api_pb_listener:get_listeners()]
+                %% good as is
+                riak_api_pb_listener:get_listeners()
         end,
-    %% 1. get the ip bound on the first non-lo interface
-    {which_eth0(), Ports}.
+    Now = os:timestamp(),
+    [[{addr, BoundAddr}, {port, Port}, {last_checked, Now}] ||
+        {BoundAddr, Port} <- figure_routed_addresses(ListenerDetails)].
 
 
--spec which_eth0() -> string() | none.
-%% @doc Returns the ip address bound on the first non-lo interface
-%%      in the underlying OS.
-which_eth0() ->
-    UpIfaces =
-        case inet:getifaddrs() of
-            {ok, Ifaces} ->
-                lists:filtermap(
-                  fun({"lo", _}) ->
-                          false;
-                     ({_eth0, Details}) ->
-                          case proplists:get_value(addr, Details) of
-                              undefined ->
-                                  false;
-                              Addr ->
-                                  {true, inet:ntoa(Addr)}
-                          end
+is_addr_wildcard(A) when A == {0,0,0,0}; A == {0,0,0,0, 0,0,0,0} ->
+    true;
+is_addr_wildcard(S) when is_list(S) ->
+    {ok, A} = inet:parse_address(S),
+    is_addr_wildcard(A);
+is_addr_wildcard(_) ->
+    false.
+
+
+-spec figure_routed_addresses([{inet:ip_address(), inet:port_number()}]) ->
+    [{inet:ip_address(), inet:port_number()}].
+%% @private
+%% Find suitable routed addresses for listening ones:
+%% - if a listener has it spelled out, take that, but check that it
+%%   matches some of the bound addresses;
+%% - if a listener has 0.0.0.0, take the first non-loopback address.
+figure_routed_addresses(ListenerDetails) ->
+    {_ifaces, BoundAddresses} =
+        lists:unzip(get_routed_interfaces()),
+    lists:map(
+      fun({Addr, Port}) ->
+              case {is_addr_wildcard(Addr), lists:member(Addr, BoundAddresses)} of
+                  {true, _} ->
+                      {hd(BoundAddresses), Port};  %% this is likely(1)
+                  {false, true} ->
+                      {Addr, Port};  %% as configured
+                  {false, false} ->
+                      lager:log(
+                        warning, self(),
+                        "API listener at ~s:~b not accessible via any routed addresses (~s)",
+                        [Addr, Port,
+                         string:join(lists:map(fun inet:ntoa/1, BoundAddresses), ", ")]),
+                      {not_routed, Port}
+              end
+      end,
+      ListenerDetails).
+
+
+-spec metadata_put_entrypoints(proto(), [{node(), ep()}]) -> [ep()].
+%% @private
+%% Merge with update NewList with CachedList
+metadata_put_entrypoints(Proto, NewList) ->
+    case riak_core_metadata:get(?EP_META_PREFIX, Proto) of
+        undefined ->
+            ok = riak_core_metadata:put(?EP_META_PREFIX, Proto, NewList),
+            NewList;
+        CachedList ->
+            UpdatedList =
+                lists:foldl(
+                  fun(Updating = {Node, _}, Acc) ->
+                          lists:keystore(Node, 1, Acc, Updating)
                   end,
-                  Ifaces);
-            {error, PosixCode} ->
-                _ = lager:log(error, self(), "Failed to enumerate network ifaces: ~p", [PosixCode]),
-                []
-        end,
-    case length(UpIfaces) of
-        1 ->
-            %% single externally accessible ip, a common and sound setup
-            hd(UpIfaces);
-        0 ->
-            %% dark node!
-            _ = lager:log(warning, self(), "No interfaces with bound ip found", []),
-            none;
-        Many ->
-            %% Admins got carried away.
-            %% To be perfectly accurate, it would probably make sense to match
-            %% these IPs to those returned by get_listeners and exclude the IPs
-            %% not registered by the listeners.  I can imagine a setup where
-            %% erlang nodes are set up to communicate over infiniband while
-            %% some controlling traffic is routed over eth0.
-            %%
-            %% Be done with a log warning, for now.
-            _ = lager:log(
-              warning, self(), "Multiple interfaces (~b) with bound ip found; returning the first",
-              [Many]),
-            hd(UpIfaces)
+                  CachedList,
+                  NewList),
+            ok = riak_core_metadata:put(?EP_META_PREFIX, Proto, UpdatedList),
+            UpdatedList
     end.
+
+-spec metadata_get_entrypoints(proto(), [node()]) -> [ep()] | undefined.
+%% @private
+metadata_get_entrypoints(Proto, Nodes) ->
+    case riak_core_metadata:get(?EP_META_PREFIX, Proto) of
+        undefined ->
+            undefined;
+        FullList ->
+            lists:filter(
+              fun({K, _}) -> lists:member(K, Nodes) end,
+              FullList)
+            %% can result in a partial set
+    end.
+
+
+-spec flatten_one_level([[any()]]) -> [any()].
+%% @private
+flatten_one_level(L) ->
+    lists:map(fun([M]) -> M; (M) -> M end, L).
