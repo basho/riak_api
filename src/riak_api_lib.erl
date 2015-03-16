@@ -27,7 +27,6 @@
 -export([get_routed_interfaces/0,
          get_entrypoints/1,
          get_entrypoints/2]).
--export([metadata_get_entrypoints/2, metadata_put_entrypoints/2]).
 -export([get_entrypoints_local/1]).  %% called via rpc:call
 
 -type proto() :: http|pbc.
