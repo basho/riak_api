@@ -127,9 +127,11 @@ is_routed_addr(Details) ->
            %% iface is reported as 'running' when it's not according
            %% to ifconfig -- why?
            not lists:member(loopback, Flags)),
-          ?plget(addr, Details)} of
-        {true, Addr} when Addr /= undefined ->
-            Addr;
+          proplists:get_all_values(addr, Details)} of
+        {true, [_|_]} = Ipv4AndPossibly6 ->
+            %% prefer the ipv4 addr (4-elem tuple < 6-elem tuple),
+            %% only select ipv6 if ipv4 is missing
+            hd(lists:sort(Ipv4AndPossibly6));
         _ ->
             undefined
     end.
