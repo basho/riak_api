@@ -128,7 +128,7 @@ is_routed_addr(Details) ->
            %% to ifconfig -- why?
            not lists:member(loopback, Flags)),
           proplists:get_all_values(addr, Details)} of
-        {true, [_|_]} = Ipv4AndPossibly6 ->
+        {true, [_|_] = Ipv4AndPossibly6} ->
             %% prefer the ipv4 addr (4-elem tuple < 6-elem tuple),
             %% only select ipv6 if ipv4 is missing
             hd(lists:sort(Ipv4AndPossibly6));
