@@ -61,17 +61,6 @@ get_entrypoints(Proto, Options) ->
                 Subset
         end,
     case ?plget(force_update, Options, false) of
-        false ->
-            case metadata_get_entrypoints(Proto, Nodes) of
-                PartialOrUndefined
-                  when PartialOrUndefined == undefined
-                       orelse length(PartialOrUndefined) /= length(Nodes) ->
-                    get_entrypoints(
-                      Proto, lists:keystore(force_update, 1, Options,
-                                            {force_update, true}));
-                FullSet ->
-                    FullSet
-            end;
         true ->
             {ResL, FailedNodes} =
                 rpc:multicall(
@@ -87,7 +76,18 @@ get_entrypoints(Proto, Options) ->
             end,
             GoodNodes = Nodes -- FailedNodes,
             metadata_put_entrypoints(
-              Proto, lists:zip(GoodNodes, flatten_one_level(ResL)))
+              Proto, lists:zip(GoodNodes, flatten_one_level(ResL)));
+        _ ->
+            case metadata_get_entrypoints(Proto, Nodes) of
+                PartialOrUndefined
+                  when PartialOrUndefined == undefined
+                       orelse length(PartialOrUndefined) /= length(Nodes) ->
+                    get_entrypoints(
+                      Proto, lists:keystore(force_update, 1, Options,
+                                            {force_update, true}));
+                FullSet ->
+                    FullSet
+            end
     end.
 
 
