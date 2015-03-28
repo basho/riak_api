@@ -227,7 +227,7 @@ metadata_get_entrypoints(Proto, Nodes) ->
     end.
 
 
--spec flatten_one_level([[any()]]) -> [any()].
+-spec flatten_one_level([any()]) -> [any()].
 %% @private
 flatten_one_level(L) ->
     lists:map(fun([M]) -> M; (M) -> M end, L).
