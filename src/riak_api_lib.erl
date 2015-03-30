@@ -41,7 +41,7 @@
 -define(plget, proplists:get_value).
 
 
--spec get_entrypoints(proto()) -> [{node(), ep()}] | undefined.
+-spec get_entrypoints(proto()) -> [{node(), [ep()]}] | undefined.
 %% @doc Wrapper for get_entrypoints(Proto, [{force_update, false},
 %%      {restrict_nodes, all}]).
 get_entrypoints(Proto) ->
@@ -70,9 +70,9 @@ get_entrypoints(Proto, Options) ->
                 [] ->
                     fine;
                 FailedNodes ->
-                    lager:log(
-                      warning, self(), "Failed to get ~p riak api listeners at node(s) ~999p",
-                      [Proto, FailedNodes])
+                    ok = lager:log(
+                           warning, self(), "Failed to get ~p riak api listeners at node(s) ~999p",
+                           [Proto, FailedNodes])
             end,
             GoodNodes = Nodes -- FailedNodes,
             metadata_put_entrypoints(
@@ -182,18 +182,18 @@ figure_routed_addresses(ListenerDetails) ->
                   {false, true} ->
                       {Addr, Port};  %% as configured
                   {false, false} ->
-                      lager:log(
-                        warning, self(),
-                        "API listener at ~s:~b not accessible via any routed addresses (~s)",
-                        [Addr, Port,
-                         string:join(lists:map(fun inet:ntoa/1, BoundAddresses), ", ")]),
+                      ok = lager:log(
+                             warning, self(),
+                             "API listener at ~s:~b not accessible via any routed addresses (~s)",
+                             [Addr, Port,
+                              string:join(lists:map(fun inet:ntoa/1, BoundAddresses), ", ")]),
                       {not_routed, Port}
               end
       end,
       ListenerDetails).
 
 
--spec metadata_put_entrypoints(proto(), [{node(), ep()}]) -> [ep()].
+-spec metadata_put_entrypoints(proto(), [{node(), [ep()]}]) -> [ep()].
 %% @private
 %% Merge with update NewList with CachedList
 metadata_put_entrypoints(Proto, NewList) ->
@@ -213,7 +213,7 @@ metadata_put_entrypoints(Proto, NewList) ->
             UpdatedList
     end.
 
--spec metadata_get_entrypoints(proto(), [node()]) -> [ep()] | undefined.
+-spec metadata_get_entrypoints(proto(), [node()]) -> [{node(), [ep()]}] | undefined.
 %% @private
 metadata_get_entrypoints(Proto, Nodes) ->
     case riak_core_metadata:get(?EP_META_PREFIX, Proto) of
