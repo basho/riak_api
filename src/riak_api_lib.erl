@@ -174,11 +174,15 @@ is_addr_wildcard(_) ->
 figure_routed_addresses(ListenerDetails) ->
     {_ifaces, BoundAddresses} =
         lists:unzip(get_routed_interfaces()),
+    FirstAvailable =
+        if BoundAddresses == [] -> not_routed;
+           el/=se -> hd(BoundAddresses)
+        end,
     lists:map(
       fun({Addr, Port}) ->
               case {is_addr_wildcard(Addr), lists:member(Addr, BoundAddresses)} of
                   {true, _} ->
-                      {hd(BoundAddresses), Port};  %% this is likely(1)
+                      {FirstAvailable, Port};  %% this is likely(1)
                   {false, true} ->
                       {Addr, Port};  %% as configured
                   {false, false} ->
