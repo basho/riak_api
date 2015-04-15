@@ -75,8 +75,9 @@ get_entrypoints(Proto, Options) ->
                            [Proto, FailedNodes])
             end,
             GoodNodes = Nodes -- FailedNodes,
-            metadata_put_entrypoints(
-              Proto, lists:zip(GoodNodes, flatten_one_level(ResL)));
+            EntryPoints = lists:zip(GoodNodes, flatten_one_level(ResL)),
+            metadata_put_entrypoints(Proto, EntryPoints),
+            EntryPoints;
         _ ->
             case metadata_get_entrypoints(Proto, Nodes) of
                 PartialOrUndefined
@@ -197,7 +198,7 @@ figure_routed_addresses(ListenerDetails) ->
       ListenerDetails).
 
 
--spec metadata_put_entrypoints(proto(), [{node(), [ep()]}]) -> [ep()].
+-spec metadata_put_entrypoints(proto(), [{node(), [ep()]}]) -> ok.
 %% @private
 %% Merge with update NewList with CachedList
 metadata_put_entrypoints(Proto, NewList) ->
@@ -213,8 +214,7 @@ metadata_put_entrypoints(Proto, NewList) ->
                   end,
                   CachedList,
                   NewList),
-            ok = riak_core_metadata:put(?EP_META_PREFIX, Proto, UpdatedList),
-            UpdatedList
+            ok = riak_core_metadata:put(?EP_META_PREFIX, Proto, UpdatedList)
     end.
 
 -spec metadata_get_entrypoints(proto(), [node()]) -> [{node(), [ep()]}] | undefined.
