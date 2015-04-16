@@ -30,10 +30,13 @@
 -export([get_entrypoints_local/1]).  %% called via rpc:call
 
 -type proto() :: http|pbc.
--type ep() :: [{addr, inet:ip_address() | not_routed} | {port, inet:port_number()} |
+-type maybe_routed_address() :: inet:ip_address() | no_interfaces | not_routed.
+-type ep() :: [{addr, maybe_routed_address()} | {port, inet:port_number()} |
                {proto, proto()} | {last_checked, {integer(), integer(), integer()}}].
 -type get_entrypoints_options() :: [{force_update, boolean()} |
                                     {restrict_nodes, [node()]|all}].
+-export_type([proto/0, maybe_routed_address/0, ep/0,
+             get_entrypoints_options/0]).
 
 -define(EP_META_PREFIX, {api, entrypoint}).
 -define(RPC_TIMEOUT, 10000).
@@ -166,7 +169,7 @@ is_addr_wildcard(_) ->
 
 
 -spec figure_routed_addresses([{inet:ip_address(), inet:port_number()}]) ->
-    [{inet:ip_address(), inet:port_number()}].
+    [{maybe_routed_address(), inet:port_number()}].
 %% @private
 %% Find suitable routed addresses for listening ones:
 %% - if a listener has it spelled out, take that, but check that it
@@ -175,15 +178,17 @@ is_addr_wildcard(_) ->
 figure_routed_addresses(ListenerDetails) ->
     {_ifaces, BoundAddresses} =
         lists:unzip(get_routed_interfaces()),
-    FirstAvailable =
-        if BoundAddresses == [] -> not_routed;
-           el/=se -> hd(BoundAddresses)
-        end,
     lists:map(
       fun({Addr, Port}) ->
               case {is_addr_wildcard(Addr), lists:member(Addr, BoundAddresses)} of
+                  {true, _} when length(BoundAddresses) == 0 ->
+                      ok = lager:log(
+                             warning, self(),
+                             "API listener at *:~b not accessible because node ~s has no routed addresses",
+                             [Port, node()]),
+                      {no_interfaces, Port};
                   {true, _} ->
-                      {FirstAvailable, Port};  %% this is likely(1)
+                      {hd(BoundAddresses), Port};
                   {false, true} ->
                       {Addr, Port};  %% as configured
                   {false, false} ->
