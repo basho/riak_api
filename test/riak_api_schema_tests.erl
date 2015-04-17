@@ -12,6 +12,7 @@ basic_schema_test() ->
     cuttlefish_unit:assert_not_configured(Config, "riak_api.https"),
     cuttlefish_unit:assert_config(Config, "riak_api.pb_backlog", 128),
     cuttlefish_unit:assert_config(Config, "riak_api.disable_pb_nagle", true),
+    cuttlefish_unit:assert_config(Config, "riak_api.pb_keepalive", true),
     cuttlefish_unit:assert_config(Config, "riak_api.honor_cipher_order", basho_vm(true, false)),
     cuttlefish_unit:assert_config(Config, "riak_api.tls_protocols", ['tlsv1.2']),
     cuttlefish_unit:assert_config(Config, "riak_api.check_crl", basho_vm(true, false)),
@@ -29,6 +30,7 @@ override_schema_test() ->
         {["listener", "https", "external"], "127.0.0.13:443"},
         {["protobuf", "backlog"], 64},
         {["protobuf", "nagle"], on},
+        {["protobuf", "keepalive"], off},
         {["honor_cipher_order"], off},
         {["tls_protocols", "sslv3"], on},
         {["tls_protocols", "tlsv1"], on},
@@ -44,6 +46,7 @@ override_schema_test() ->
     cuttlefish_unit:assert_config(Config, "riak_api.https", [{"127.0.0.13", 443}, {"127.0.0.12", 443}]),
     cuttlefish_unit:assert_config(Config, "riak_api.pb_backlog", 64),
     cuttlefish_unit:assert_config(Config, "riak_api.disable_pb_nagle", false),
+    cuttlefish_unit:assert_config(Config, "riak_api.pb_keepalive", false),
     cuttlefish_unit:assert_config(Config, "riak_api.tls_protocols", ['tlsv1.1', tlsv1, sslv3]),
     cuttlefish_unit:assert_config(Config, "riak_api.check_crl", false),
     ok.
