@@ -46,18 +46,41 @@ init() ->
     undefined.
 
 %% @doc decode/2 callback. Decodes an incoming message.
-decode(Code, Bin) when Code == 31; Code == 32 ->
+decode(Code, Bin) ->
     Msg = riak_pb_codec:decode(Code, Bin),
     case Msg of
         #rpbgetbuckettypereq{type=T} ->
             {ok, Msg, {"riak_core.get_bucket_type", T}};
         #rpbsetbuckettypereq{type=T} ->
-            {ok, Msg, {"riak_core.set_bucket_type", T}}
+            {ok, Msg, {"riak_core.set_bucket_type", T}};
+        #rpbcreatebuckettypereq{type=T} ->
+            {ok, Msg, {"riak_core.create_bucket_type", T}};
+        #rpbactivatebuckettypereq{type=T} ->
+            {ok, Msg, {"riak_core.create_bucket_type", T}}
     end.
 
 %% @doc encode/1 callback. Encodes an outgoing response message.
 encode(Message) ->
     {ok, riak_pb_codec:encode(Message)}.
+
+%% Create bucket type
+process(#rpbcreatebuckettypereq{type = T, props = PbProps}, State) ->
+    Props = riak_pb_codec:decode_bucket_props(PbProps),
+    case riak_core_bucket_type:create(T, Props) of
+        ok ->
+            {reply, rpbsetbucketresp, State};
+        {error, Details} ->
+            {error, {format, "Invalid bucket properties: ~p", [Details]}, State}
+    end;
+
+%% Activate bucket type
+process(#rpbactivatebuckettypereq{type = T}, State) ->
+    case riak_core_bucket_type:activate(T) of
+        ok ->
+            {reply, rpbsetbucketresp, State};
+        {error, Details} ->
+            {error, {format, "Invalid bucket type: ~p", [Details]}, State}
+    end;
 
 %% Get bucket type properties
 process(#rpbgetbuckettypereq{type = T}, State) ->
