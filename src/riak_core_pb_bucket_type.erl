@@ -68,7 +68,7 @@ process(#rpbcreatebuckettypereq{type = T, props = PbProps}, State) ->
     Props = riak_pb_codec:decode_bucket_props(PbProps),
     case riak_core_bucket_type:create(T, Props) of
         ok ->
-            {reply, rpbsetbucketresp, State};
+            {reply, rpbcreatebuckettyperesp, State};
         {error, Details} ->
             {error, {format, "Invalid bucket properties: ~p", [Details]}, State}
     end;
@@ -77,7 +77,7 @@ process(#rpbcreatebuckettypereq{type = T, props = PbProps}, State) ->
 process(#rpbactivatebuckettypereq{type = T}, State) ->
     case riak_core_bucket_type:activate(T) of
         ok ->
-            {reply, rpbsetbucketresp, State};
+            {reply, rpbactivatebuckettyperesp, State};
         {error, Details} ->
             {error, {format, "Invalid bucket type: ~p", [Details]}, State}
     end;
