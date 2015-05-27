@@ -34,7 +34,7 @@
                    {riak_core_pb_bucket, 19, 22},
                    {riak_core_pb_bucket, 29, 30},
                    {riak_core_pb_bucket_type, 31, 32},
-                   {riak_core_pb_bucket_type, 35, 39}
+                   {riak_core_pb_bucket_type, 35, 38}
                   ]).
 
 %% @doc The application:start callback.

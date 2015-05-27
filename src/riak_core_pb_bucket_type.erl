@@ -56,7 +56,7 @@ decode(Code, Bin) ->
         #rpbcreatebuckettypereq{type=T} ->
             {ok, Msg, {"riak_core.create_bucket_type", T}};
         #rpbactivatebuckettypereq{type=T} ->
-            {ok, Msg, {"riak_core.create_bucket_type", T}}
+            {ok, Msg, {"riak_core.activate_bucket_type", T}}
     end.
 
 %% @doc encode/1 callback. Encodes an outgoing response message.
