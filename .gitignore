@@ -1,3 +1,4 @@
+.rebar/erlcinfo
 .eunit/*
 deps/*
 priv/*
