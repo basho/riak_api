@@ -27,6 +27,8 @@
 %% <pre>
 %% 31 - RpbGetBucketTypeReq
 %% 32 - RpbSetBucketTypeReq
+%% 35 - RpbCreateBucketTypeReq
+%% 37 - RpbActivateBucketTypeReq
 %% </pre>
 %%
 %% @end
@@ -48,16 +50,16 @@ init() ->
 %% @doc decode/2 callback. Decodes an incoming message.
 decode(Code, Bin) ->
     Msg = riak_pb_codec:decode(Code, Bin),
-    case Msg of
-        #rpbgetbuckettypereq{type=T} ->
-            {ok, Msg, {"riak_core.get_bucket_type", T}};
-        #rpbsetbuckettypereq{type=T} ->
-            {ok, Msg, {"riak_core.set_bucket_type", T}};
-        #rpbcreatebuckettypereq{type=T} ->
-            {ok, Msg, {"riak_core.create_bucket_type", T}};
-        #rpbactivatebuckettypereq{type=T} ->
-            {ok, Msg, {"riak_core.activate_bucket_type", T}}
-    end.
+    decode_msg(Code, Msg).
+
+decode_msg(31, Msg=#rpbgetbuckettypereq{type=T}) ->
+    {ok, Msg, {"riak_core.get_bucket_type", T}};
+decode_msg(32, Msg=#rpbsetbuckettypereq{type=T}) ->
+    {ok, Msg, {"riak_core.set_bucket_type", T}};
+decode_msg(35, Msg=#rpbcreatebuckettypereq{type=T}) ->
+    {ok, Msg, {"riak_core.create_bucket_type", T}};
+decode_msg(37, Msg=#rpbactivatebuckettypereq{type=T}) ->
+    {ok, Msg, {"riak_core.activate_bucket_type", T}}.
 
 %% @doc encode/1 callback. Encodes an outgoing response message.
 encode(Message) ->
@@ -104,4 +106,3 @@ process(#rpbsetbuckettypereq{type = T, props = PbProps}, State) ->
 
 process_stream(_, _, State) ->
     {ignore, State}.
-
