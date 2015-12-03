@@ -209,16 +209,15 @@ connected(timeout, State=#state{outbuffer=Buffer}) ->
     %% Flush any protocol messages that have been buffering
     {ok, Data, NewBuffer} = riak_api_pb_frame:flush(Buffer),
     {next_state, connected, flush(Data, State#state{outbuffer=NewBuffer})};
-connected({msg, 110, MsgData}, State=#state{socket=Socket,
-                                            transport={Transport,_Control}}) ->
+connected({msg, 110, MsgData}, State) ->
     try
-        RawTermReq = riak_pb_codec:decode(110, MsgData),
+        #rpbrawtermreq{use_raw=Raw} = riak_pb_codec:decode(110, MsgData),
         %% Generate a response in the same encoding before setting the
         %% process dictionary flag
-        Resp = riak_pb_codec:msg_code(rpbsetrawresp),
+        Resp = riak_pb_codec:encode(#rpbrawtermresp{use_raw=Raw}),
 
-        put(use_raw, RawTermReq#rpbrawtermreq.use_raw),
-        Transport:send(Socket, <<1:32/unsigned-big, Resp:8>>),
+        put(use_raw, Raw),
+        send_message(Resp, State),
         {next_state, connected, State}
     catch
         Type:Failure ->
