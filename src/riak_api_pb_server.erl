@@ -209,6 +209,24 @@ connected(timeout, State=#state{outbuffer=Buffer}) ->
     %% Flush any protocol messages that have been buffering
     {ok, Data, NewBuffer} = riak_api_pb_frame:flush(Buffer),
     {next_state, connected, flush(Data, State#state{outbuffer=NewBuffer})};
+connected({msg, 110, MsgData}, State=#state{socket=Socket,
+                                            transport={Transport,_Control}}) ->
+    try
+        RawTermReq = riak_pb_codec:decode(110, MsgData),
+        %% Generate a response in the same encoding before setting the
+        %% process dictionary flag
+        Resp = riak_pb_codec:msg_code(rpbsetrawresp),
+
+        put(use_raw, RawTermReq#rpbrawtermreq.use_raw),
+        Transport:send(Socket, <<1:32/unsigned-big, Resp:8>>),
+        {next_state, connected, State}
+    catch
+        Type:Failure ->
+            Trace = erlang:get_stacktrace(),
+            FState = send_error_and_flush({format, "Error processing incoming message: ~p:~p:~p",
+                                           [Type, Failure, Trace]}, State),
+            {stop, {Type, Failure, Trace}, FState}
+    end;
 connected({msg, MsgCode, MsgData}, State=#state{states=ServiceStates}) ->
     try
         %% First find the appropriate service module to dispatch
