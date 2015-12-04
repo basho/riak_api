@@ -217,8 +217,13 @@ connected({msg, 110, MsgData}, State) ->
         Resp = riak_pb_codec:encode(#rpbrawtermresp{use_raw=Raw}),
 
         put(use_raw, Raw),
-        send_message(Resp, State),
-        {next_state, connected, State}
+
+        %% Must send a response immediately despite buffering, so
+        %% force the issue
+        State1 = send_message(Resp, State),
+        {ok, Data, NewBuffer} = riak_api_pb_frame:flush(State1#state.outbuffer),
+        State2 = flush(Data, State1#state{outbuffer=NewBuffer}),
+        {next_state, connected, State2}
     catch
         Type:Failure ->
             Trace = erlang:get_stacktrace(),
