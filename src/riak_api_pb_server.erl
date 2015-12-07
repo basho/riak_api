@@ -215,7 +215,7 @@ connected({msg, 110, MsgData}, State) ->
         #rpbtoggleencodingreq{use_native=Raw} = riak_pb_codec:decode(110, MsgData),
         %% Generate a response in the same encoding before setting the
         %% process dictionary flag
-        Resp = riak_pb_codec:encode(#rpbnativeencodingresp{use_native=Raw}),
+        Resp = riak_pb_codec:encode(#rpbtoggleencodingresp{use_native=Raw}),
 
         %% Future developers, please forgive me. Threading this all the
         %% way through to the PB encoding layer would be a significant
