@@ -61,6 +61,10 @@
 -type format() :: {format, term()} | {format, io:format(), [term()]}.
 -export_type([format/0]).
 
+%% Protobuf message code for switching between protobuf and native
+%% Erlang encoding.
+-define(PB_TOGGLE_ENCODING, 110).
+
 %% ===================================================================
 %% Public API
 %% ===================================================================
@@ -209,7 +213,7 @@ connected(timeout, State=#state{outbuffer=Buffer}) ->
     %% Flush any protocol messages that have been buffering
     {ok, Data, NewBuffer} = riak_api_pb_frame:flush(Buffer),
     {next_state, connected, flush(Data, State#state{outbuffer=NewBuffer})};
-connected({msg, 110, MsgData}, State) ->
+connected({msg, ?PB_TOGGLE_ENCODING, MsgData}, State) ->
     %% Hard-coded match on the new native term_to_binary encoding message
     try
         #rpbtoggleencodingreq{use_native=Raw} = riak_pb_codec:decode(110, MsgData),
