@@ -210,13 +210,17 @@ connected(timeout, State=#state{outbuffer=Buffer}) ->
     {ok, Data, NewBuffer} = riak_api_pb_frame:flush(Buffer),
     {next_state, connected, flush(Data, State#state{outbuffer=NewBuffer})};
 connected({msg, 110, MsgData}, State) ->
+    %% Hard-coded match on the new native term_to_binary encoding message
     try
-        #rpbrawtermreq{use_raw=Raw} = riak_pb_codec:decode(110, MsgData),
+        #rpbtoggleencodingreq{use_native_encoding=Raw} = riak_pb_codec:decode(110, MsgData),
         %% Generate a response in the same encoding before setting the
         %% process dictionary flag
-        Resp = riak_pb_codec:encode(#rpbrawtermresp{use_raw=Raw}),
+        Resp = riak_pb_codec:encode(#rpbnativeencodingresp{use_native_encoding=Raw}),
 
-        put(use_raw, Raw),
+        %% Future developers, please forgive me. Threading this all the
+        %% way through to the PB encoding layer would be a significant
+        %% change
+        put(pb_use_native_encoding, Raw),
 
         %% Must send a response immediately despite buffering, so
         %% force the issue
