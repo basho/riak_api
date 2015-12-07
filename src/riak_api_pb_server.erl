@@ -212,10 +212,10 @@ connected(timeout, State=#state{outbuffer=Buffer}) ->
 connected({msg, 110, MsgData}, State) ->
     %% Hard-coded match on the new native term_to_binary encoding message
     try
-        #rpbtoggleencodingreq{use_native_encoding=Raw} = riak_pb_codec:decode(110, MsgData),
+        #rpbtoggleencodingreq{use_native=Raw} = riak_pb_codec:decode(110, MsgData),
         %% Generate a response in the same encoding before setting the
         %% process dictionary flag
-        Resp = riak_pb_codec:encode(#rpbnativeencodingresp{use_native_encoding=Raw}),
+        Resp = riak_pb_codec:encode(#rpbnativeencodingresp{use_native=Raw}),
 
         %% Future developers, please forgive me. Threading this all the
         %% way through to the PB encoding layer would be a significant
