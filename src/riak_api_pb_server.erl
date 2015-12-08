@@ -61,6 +61,10 @@
 -type format() :: {format, term()} | {format, io:format(), [term()]}.
 -export_type([format/0]).
 
+%% Protobuf message code for switching between protobuf and native
+%% Erlang encoding.
+-define(PB_TOGGLE_ENCODING, 110).
+
 %% ===================================================================
 %% Public API
 %% ===================================================================
@@ -209,6 +213,32 @@ connected(timeout, State=#state{outbuffer=Buffer}) ->
     %% Flush any protocol messages that have been buffering
     {ok, Data, NewBuffer} = riak_api_pb_frame:flush(Buffer),
     {next_state, connected, flush(Data, State#state{outbuffer=NewBuffer})};
+connected({msg, ?PB_TOGGLE_ENCODING, MsgData}, State) ->
+    %% Hard-coded match on the new native term_to_binary encoding message
+    try
+        #rpbtoggleencodingreq{use_native=Raw} = riak_pb_codec:decode(110, MsgData),
+        %% Generate a response in the same encoding before setting the
+        %% process dictionary flag
+        Resp = riak_pb_codec:encode(#rpbtoggleencodingresp{use_native=Raw}),
+
+        %% Future developers, please forgive me. Threading this all the
+        %% way through to the PB encoding layer would be a significant
+        %% change
+        put(pb_use_native_encoding, Raw),
+
+        %% Must send a response immediately despite buffering, so
+        %% force the issue
+        State1 = send_message(Resp, State),
+        {ok, Data, NewBuffer} = riak_api_pb_frame:flush(State1#state.outbuffer),
+        State2 = flush(Data, State1#state{outbuffer=NewBuffer}),
+        {next_state, connected, State2}
+    catch
+        Type:Failure ->
+            Trace = erlang:get_stacktrace(),
+            FState = send_error_and_flush({format, "Error processing incoming message: ~p:~p:~p",
+                                           [Type, Failure, Trace]}, State),
+            {stop, {Type, Failure, Trace}, FState}
+    end;
 connected({msg, MsgCode, MsgData}, State=#state{states=ServiceStates}) ->
     try
         %% First find the appropriate service module to dispatch
