@@ -9,13 +9,13 @@
 init() ->
     undefined.
 
-decode(101, <<>>) ->
+decode(201, <<>>) ->
     {ok, dummyreq};
 decode(_,_) ->
     {error, unknown_message}.
 
 encode(ok) ->
-    {ok, <<102,$s,$w,$a,$p>>};
+    {ok, <<202,$s,$w,$a,$p>>};
 encode(_) ->
     error.
 

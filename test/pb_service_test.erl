@@ -12,34 +12,34 @@
          process/2,
          process_stream/3]).
 
--define(MSGMIN, 99).
--define(MSGMAX, 109).
+-define(MSGMIN, 199).
+-define(MSGMAX, 209).
 
 init() ->
     undefined.
-decode(99, _) ->
+decode(199, _) ->
     {ok, bigreq};
-decode(101, <<>>) ->
+decode(201, <<>>) ->
     {ok, dummyreq};
-decode(103, <<>>) ->
+decode(203, <<>>) ->
     {ok, badresponse};
-decode(106, <<>>) ->
+decode(206, <<>>) ->
     {ok, internalerror};
-decode(107, <<>>) ->
+decode(207, <<>>) ->
     {ok, stream};
-decode(110, _) ->
+decode(210, _) ->
     {ok, dummyreq};
-decode(111, _) ->
+decode(211, _) ->
     {ok, stream_multi};
 decode(_,_) ->
     {error, unknown_message}.
 
 encode(foo) ->
-    {ok, <<108,$f,$o,$o>>};
+    {ok, <<208,$f,$o,$o>>};
 encode(bar) ->
-    {ok, <<109,$b,$a,$r>>};
+    {ok, <<209,$b,$a,$r>>};
 encode(ok) ->
-    {ok, <<102,$o,$k>>};
+    {ok, <<202,$o,$k>>};
 encode(_) ->
     error.
 
@@ -105,7 +105,7 @@ setup() ->
     unlink(Sup),
     wait_for_port(),
     riak_api_pb_service:register(?MODULE, ?MSGMIN, ?MSGMAX),
-    riak_api_pb_service:register(?MODULE, 111),
+    riak_api_pb_service:register(?MODULE, 211),
     {OldListeners, Sup}.
 
 
@@ -178,26 +178,26 @@ simple_test_() ->
      fun cleanup/1,
      [
       %% Happy path, sync operation
-      ?_assertEqual([102|<<"ok">>], request(101, <<>>)),
+      ?_assertEqual([202|<<"ok">>], request(201, <<>>)),
       %% Happy path, streaming operation
-      ?_assertEqual([{108, <<"foo">>},{108, <<"foo">>},{109,<<"bar">>}],
-                    request_stream(107, <<>>, fun([Code|_]) -> Code == 109 end)),
+      ?_assertEqual([{208, <<"foo">>},{208, <<"foo">>},{209,<<"bar">>}],
+                    request_stream(207, <<>>, fun([Code|_]) -> Code == 209 end)),
       %% Happy path, multi-message streaming
-      ?_assertEqual([{108, <<"foo">>},{108, <<"foo">>},{108, <<"foo">>}, {109,<<"bar">>}],
-                    request_stream(111, <<>>, fun([Code|_]) -> Code == 109 end)),
+      ?_assertEqual([{208, <<"foo">>},{208, <<"foo">>},{208, <<"foo">>}, {209,<<"bar">>}],
+                    request_stream(211, <<>>, fun([Code|_]) -> Code == 209 end)),
       %% Unknown request message code
-      ?_assertMatch([0|Bin] when is_binary(Bin), request(105, <<>>)),
+      ?_assertMatch([0|Bin] when is_binary(Bin), request(205, <<>>)),
       %% Undecodable request message code
-      ?_assertMatch([0|Bin] when is_binary(Bin), request(102, <<>>)),
+      ?_assertMatch([0|Bin] when is_binary(Bin), request(202, <<>>)),
       %% Unencodable response message
-      ?_assertMatch([0|Bin] when is_binary(Bin), request(103, <<>>)),
+      ?_assertMatch([0|Bin] when is_binary(Bin), request(203, <<>>)),
       %% Internal service error
-      ?_assertMatch([0|Bin] when is_binary(Bin), request(106, <<>>)),
+      ?_assertMatch([0|Bin] when is_binary(Bin), request(206, <<>>)),
       %% Send a message that spans multiple TCP packets
-      ?_assertMatch([108|<<"foo">>], request(99, binary:copy(<<"BIGDATA">>, 1024))),
+      ?_assertMatch([208|<<"foo">>], request(199, binary:copy(<<"BIGDATA">>, 1024))),
       %% Send a payload with more than one message in it
-      ?_assertMatch([[102|<<"ok">>],[102|<<"ok">>]],
-                    request_multi([{101, <<>>}, {101, <<>>}]))
+      ?_assertMatch([[202|<<"ok">>],[202|<<"ok">>]],
+                    request_multi([{201, <<>>}, {201, <<>>}]))
      ]}.
 
 late_registration_test_() ->
@@ -207,13 +207,13 @@ late_registration_test_() ->
      ?_test(begin
                 %% First we check that the unregistered message code
                 %% returns an error to the client.
-                ?assertMatch([0|Bin] when is_binary(Bin), request(110, <<>>)),
+                ?assertMatch([0|Bin] when is_binary(Bin), request(210, <<>>)),
                 %% Now we make a new connection
                 {ok, Socket} = new_connection(),
                 %% And with the connection open, register the message code late.
-                riak_api_pb_service:register(?MODULE, 110),
+                riak_api_pb_service:register(?MODULE, 210),
                 %% Now request the message and we should get success.
-                ?assertEqual([102|<<"ok">>], request(110, <<>>, Socket))
+                ?assertEqual([202|<<"ok">>], request(210, <<>>, Socket))
             end)
     }.
 
@@ -234,12 +234,12 @@ swap_test_() ->
      fun setup/0,
      fun cleanup/1,
      ?_test(begin
-                ?assertEqual([102|<<"ok">>], request(101, <<>>)),
-                R1 = riak_api_pb_service:swap(pb_dummy_svc, 99, 110),
+                ?assertEqual([202|<<"ok">>], request(201, <<>>)),
+                R1 = riak_api_pb_service:swap(pb_dummy_svc, 199, 210),
                 ?assertMatch({error, _}, R1),
-                R2 = riak_api_pb_service:swap(pb_dummy_svc, 99, 109),
+                R2 = riak_api_pb_service:swap(pb_dummy_svc, 199, 209),
                 ?assertEqual(ok, R2),
-                ?assertEqual([102|<<"swap">>], request(101, <<>>))
+                ?assertEqual([202|<<"swap">>], request(201, <<>>))
             end)}.
 
 
