@@ -1,25 +1,3 @@
-%% -------------------------------------------------------------------
-%%
-%% riak_kv_pb_socket: service protocol buffer clients
-%%
-%% Copyright (c) 2007-2010 Basho Technologies, Inc.  All Rights Reserved.
-%%
-%% This file is provided to you under the Apache License,
-%% Version 2.0 (the "License"); you may not use this file
-%% except in compliance with the License.  You may obtain
-%% a copy of the License at
-%%
-%%   http://www.apache.org/licenses/LICENSE-2.0
-%%
-%% Unless required by applicable law or agreed to in writing,
-%% software distributed under the License is distributed on an
-%% "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-%% KIND, either express or implied.  See the License for the
-%% specific language governing permissions and limitations
-%% under the License.
-%%
-%% -------------------------------------------------------------------
-
 %% @doc Service protocol buffer clients. This module implements only
 %% the TCP socket management and dispatch of incoming messages to
 %% service modules.
@@ -99,13 +77,17 @@ wait_for_socket({set_socket, Socket}, _From, State=#state{transport={_Transport,
     case Control:peername(Socket) of
         {ok, PeerInfo} ->
             Control:setopts(Socket, [{active, once}]),
-            %% check if security is enabled, if it is wait for TLS, otherwise go
-            %% straight into connected state
-            case riak_core_security:is_enabled() of
-                true ->
+            case {riak_core_security:is_enabled(),
+                  riak_core_security:is_secure_transport_required()} of
+                %% security is enabled and secure transport is required
+                {true, true} ->
                     {reply, ok, wait_for_tls, State#state{socket=Socket,
                                                           peername=PeerInfo}};
-                false ->
+                %% security is enabled and secure transport is NOT required
+                {true, false} ->
+                    {reply, ok, wait_for_auth, State#state{socket=Socket,
+                                                       peername=PeerInfo}};
+                {false, _} ->
                     {reply, ok, connected, State#state{socket=Socket,
                                                        peername=PeerInfo}}
             end;
@@ -121,8 +103,10 @@ wait_for_socket(_Event, _From, State) ->
 
 wait_for_tls({msg, MsgCode, _MsgData}, State=#state{socket=Socket,
                                                     transport={Transport, _Control}}) ->
-    case riak_pb_codec:msg_code(rpbstarttls) of
-        MsgCode ->
+    TlsOptionsValid = riak_api_ssl:validate_options(),
+    StartTlsMsgCode = riak_pb_codec:msg_code(rpbstarttls),
+    case {TlsOptionsValid, MsgCode} of
+        {ok, StartTlsMsgCode} ->
             %% got STARTTLS msg, send ACK back to client
             Transport:send(Socket, <<1:32/unsigned-big, MsgCode:8>>),
             %% now do the SSL handshake
@@ -140,15 +124,23 @@ wait_for_tls({msg, MsgCode, _MsgData}, State=#state{socket=Socket,
                     {next_state, wait_for_auth,
                      State#state{socket=NewSocket, common_name=CommonName, transport={ssl,ssl}}};
                 {error, Reason} ->
-                    lager:warning("STARTTLS with client ~s failed: ~p",
-                                  [format_peername(State#state.peername), Reason]),
-                    {stop, {error, {startls_failed, Reason}}, State}
+                    PeerName = format_peername(State#state.peername),
+                    lager:error("STARTTLS with client ~s failed: ~p",
+                                [PeerName, Reason]),
+                    {stop, {error, {starttls_failed, Reason}}, State}
             end;
+        {{error, Reason}, _} ->
+            Err = io_lib:format("TLS configuration error on node ~s: ~p",
+                                [node(), Reason]),
+            State1 = send_error_and_flush(Err, State),
+            {stop, {error, {starttls_failed, lists:flatten(Err)}}, State1};
         _ ->
-            lager:debug("Client sent unexpected message code ~p", [MsgCode]),
-            State1 = send_error_and_flush("Security is enabled, please STARTTLS first",
-                                 State),
-            {next_state, wait_for_tls, State1}
+            PeerName = format_peername(State#state.peername),
+            Err = io_lib:format("Client ~s sent unexpected message code ~p, " ++
+                                "expected ~p (RpbStartTls)",
+                                [PeerName, MsgCode, StartTlsMsgCode]),
+            State1 = send_error_and_flush(Err, State),
+            {stop, {error, {starttls_failed, lists:flatten(Err)}}, State1}
     end;
 wait_for_tls(_Event, State) ->
     {next_state, wait_for_tls, State}.
@@ -158,8 +150,20 @@ wait_for_tls(_Event, _From, State) ->
 
 wait_for_auth({msg, MsgCode, MsgData}, State=#state{socket=Socket,
                                                     transport={Transport,_Control}}) ->
-    case riak_pb_codec:msg_code(rpbauthreq) of
-        MsgCode ->
+    StartTlsCode = riak_pb_codec:msg_code(rpbstarttls),
+    AuthReqCode = riak_pb_codec:msg_code(rpbauthreq),
+    case MsgCode of
+        StartTlsCode ->
+            %% We received a STARTTLS message while we are
+            %% waiting to authenticate, return an error.
+            PeerName = format_peername(State#state.peername),
+            ErrMsg = io_lib:format("Saw start TLS session message (RpbStartTls)," ++
+                                   "but expected authenticate message (RpbAuthReq)" ++
+                                   "from client ~s", [PeerName]),
+            lager:error(ErrMsg),
+            State1 = send_error_and_flush(ErrMsg, State),
+            {stop, {error, {authentication_failed, ErrMsg}}, State1};
+        AuthReqCode ->
             %% got AUTH message, try to validate credentials
             AuthReq = riak_pb_codec:decode(MsgCode, MsgData),
             User = AuthReq#rpbauthreq.user,
@@ -194,6 +198,7 @@ wait_for_auth({msg, MsgCode, MsgData}, State=#state{socket=Socket,
                              State1#state{retries=Retries-1}}
                     end
             end;
+
         _ ->
             State1 = send_error_and_flush("Security is enabled, please "
                                           "authenticate first", State),

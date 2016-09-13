@@ -9,31 +9,35 @@ is_authorized(ReqData) ->
     case riak_core_security:is_enabled() of
         true ->
             Scheme = wrq:scheme(ReqData),
-            case Scheme == https of
+            case riak_core_security:is_this_transport_allowed(Scheme) of
                 true ->
-                    case wrq:get_req_header("Authorization", ReqData) of
-                        "Basic " ++ Base64 ->
-                            UserPass = base64:decode_to_string(Base64),
-                            [User, Pass] = [list_to_binary(X) || X <-
-                                                                 string:tokens(UserPass, ":")],
-                            {ok, Peer} = inet_parse:address(wrq:peer(ReqData)),
-                            case riak_core_security:authenticate(User, Pass,
-                                    [{ip, Peer}])
-                                of
-                                {ok, Sec} ->
-                                    {true, Sec};
-                                {error, _} ->
-                                    false
-                            end;
-                        _ ->
-                            false
-                    end;
+                    maybe_basic_authenticate(ReqData);
                 false ->
-                    %% security is enabled, but they're connecting over HTTP.
-                    %% which means if they authed, the credentials would be in
+                    %% security is enabled, but they're connecting over HTTP
+                    %% and have not chosen to specifically allow this which 
+                    %% means if they authed, the credentials would be in 
                     %% plaintext
                     insecure
             end;
         false ->
             {true, undefined} %% no security context
+    end.
+
+maybe_basic_authenticate(ReqData) ->
+    case wrq:get_req_header("Authorization", ReqData) of
+        "Basic " ++ Base64 ->
+            UserPass = base64:decode_to_string(Base64),
+            [User, Pass] = [list_to_binary(X) || X <-
+                                                 string:tokens(UserPass, ":")],
+            {ok, Peer} = inet_parse:address(wrq:peer(ReqData)),
+            case riak_core_security:authenticate(User, Pass,
+                    [{ip, Peer}])
+                of
+                {ok, Sec} ->
+                    {true, Sec};
+                {error, _} ->
+                    false
+            end;
+        _ ->
+            false
     end.

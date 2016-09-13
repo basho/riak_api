@@ -1,31 +1,19 @@
-%% -------------------------------------------------------------------
-%%
-%% riak_api_ssl: configuration for SSL/TLS connections over PB and HTTP
-%%
-%% Copyright (c) 2013-2014 Basho Technologies, Inc.  All Rights Reserved.
-%%
-%% This file is provided to you under the Apache License,
-%% Version 2.0 (the "License"); you may not use this file
-%% except in compliance with the License.  You may obtain
-%% a copy of the License at
-%%
-%%   http://www.apache.org/licenses/LICENSE-2.0
-%%
-%% Unless required by applicable law or agreed to in writing,
-%% software distributed under the License is distributed on an
-%% "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-%% KIND, either express or implied.  See the License for the
-%% specific language governing permissions and limitations
-%% under the License.
-%%
-%% -------------------------------------------------------------------
-
 %% @doc Configuration and validation routines for SSL/TLS connections
 %% to clients.
 -module(riak_api_ssl).
 
--export([options/0]).
+-export([validate_options/0,
+         options/0]).
 -include_lib("public_key/include/public_key.hrl").
+
+%% @doc Validates options for SSL/TLS connections.
+-spec validate_options() -> ok | {error, term()}.
+validate_options() ->
+    case {riak_core_security:is_enabled(),
+          riak_core_security:is_secure_transport_required()} of
+        {true, true} -> ensure_tls_files();
+        _ -> ok
+    end.
 
 %% @doc Returns a list of common options for SSL/TLS connections.
 -spec options() -> [ssl:ssl_option()].
@@ -37,10 +25,8 @@ options() ->
     Versions = app_helper:get_env(riak_api, tls_protocols, ['tlsv1.2']),
     HonorCipherOrder = app_helper:get_env(riak_api, honor_cipher_order, false),
     CheckCRL = app_helper:get_env(riak_api, check_crl, false),
-
     {Ciphers, _} = riak_core_ssl_util:parse_ciphers(riak_core_security:get_ciphers()),
     CACerts = riak_core_ssl_util:load_certs(CACertFile),
-
     [{certfile, CertFile},
      {keyfile, KeyFile},
      {cacerts, CACerts},
@@ -52,16 +38,14 @@ options() ->
      {verify, verify_peer},
      {reuse_sessions, false} %% required!
     ] ++
-    %% conditionally include the honor cipher order, don't pass it if it
-    %% disabled because it will crash any
-    %% OTP installs that lack the patch to
-    %% implement honor_cipher_order
-    [{honor_cipher_order, true} || HonorCipherOrder ] ++
+    %% conditionally include the honor cipher order,
+    %% don't pass it if it disabled because it will
+    %% crash any OTP installs that lack the patch
+    %% to implement honor_cipher_order
+    [{honor_cipher_order, true} || HonorCipherOrder] ++
     %% if we're validating CRLs, define a
     %% verify_fun for them.
-    [{verify_fun, {fun validate_function/3, {CACerts, []}}} || CheckCRL ].
-
-
+    [{verify_fun, {fun validate_function/3, {CACerts, []}}} || CheckCRL].
 
 %% @doc Validator function for SSL negotiation.
 %%
@@ -276,3 +260,26 @@ fetch([Loc|Rest]) ->
     lager:debug("unable to fetch CRL from unsupported location ~p",
                 [Loc]),
     fetch(Rest).
+
+ensure_file(SSLFileProperty, CoreSSL) ->
+    FileName = proplists:get_value(SSLFileProperty, CoreSSL),
+    case file:read_file_info(FileName) of
+        {ok, _} -> ok;
+        {error, Reason} ->
+            ErrMsg = io_lib:format("Error validating ~p ~p: ~p",
+                                   [SSLFileProperty, FileName, Reason]),
+            {error, lists:flatten(ErrMsg)}
+    end.
+
+ensure_files([], _CoreSSL) ->
+    ok;
+ensure_files([TLSFileProperty|T], CoreSSL) ->
+    case ensure_file(TLSFileProperty, CoreSSL) of
+        ok -> ensure_files(T, CoreSSL);
+        {error, _}=Error -> Error
+    end.
+
+ensure_tls_files() ->
+    CoreSSL = app_helper:get_env(riak_core, ssl),
+    TLSFileProperties = [cacertfile, certfile, keyfile],
+    ensure_files(TLSFileProperties, CoreSSL).
