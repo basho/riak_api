@@ -16,8 +16,8 @@
   end
 }.
 
-%% @doc listener.protobuf.<name> is an IP address and TCP port that the Riak
-%% Protocol Buffers interface will bind.
+%% @doc listener.protobuf.<name> is an IP address and TCP port to which
+%% the Riak Protocol Buffers interface will bind.
 {mapping, "listener.protobuf.$name", "riak_api.pb", [
   {default, {"{{pb_ip}}",{{pb_port}} }},
   {datatype, ip},
@@ -28,6 +28,22 @@
  "riak_api.pb",
  fun(Conf) ->
      PB = cuttlefish_variable:filter_by_prefix("listener.protobuf", Conf),
+     [ IP || {_, IP} <- PB]
+ end
+}.
+
+%% @doc listener.tls.<name> is an IP address and TCP port to which
+%% the Riak Protocol Buffers TLS interface will bind.
+{mapping, "listener.tls.$name", "riak_api.tls", [
+  {commented, {"{{pb_ip}}",{{pb_port}} }},
+  {datatype, ip},
+  {include_default, "internal"}
+]}.
+
+{translation,
+ "riak_api.tls",
+ fun(Conf) ->
+     PB = cuttlefish_variable:filter_by_prefix("listener.tls", Conf),
      [ IP || {_, IP} <- PB]
  end
 }.

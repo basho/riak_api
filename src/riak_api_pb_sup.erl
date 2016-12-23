@@ -61,8 +61,8 @@ stop(_S) -> ok.
       MaxT :: pos_integer(),
       ChildSpec :: supervisor:child_spec().
 init([]) ->
-    {ok,
-     {{simple_one_for_one, 10, 10},
-      [{undefined,
-        {riak_api_pb_server, start_link, []},
-        temporary, brutal_kill, worker, [riak_api_pb_server]}]}}.
+    SupFlags = {simple_one_for_one, 10, 10},
+    Id = riak_api_pb_server,
+    Start = {riak_api_pb_server, start_link, []},
+    ChildSpec = {Id, Start, temporary, brutal_kill, worker, [riak_api_pb_server]},
+    {ok, {SupFlags, [ChildSpec]}}.

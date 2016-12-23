@@ -24,7 +24,9 @@
 %% to clients.
 -module(riak_api_ssl).
 
--export([options/0]).
+-export([options/0,
+         tls_handshake_timeout/0]).
+
 -include_lib("public_key/include/public_key.hrl").
 
 %% @doc Returns a list of common options for SSL/TLS connections.
@@ -61,7 +63,10 @@ options() ->
     %% verify_fun for them.
     [{verify_fun, {fun validate_function/3, {CACerts, []}}} || CheckCRL ].
 
-
+%% @doc Returns TLS/SSL handshake timeout value
+-spec tls_handshake_timeout() -> integer().
+tls_handshake_timeout() ->
+    app_helper:get_env(riak_api, tls_handshake_timeout, 1000).
 
 %% @doc Validator function for SSL negotiation.
 %%

@@ -1,6 +1,6 @@
 %% -------------------------------------------------------------------
 %%
-%% riak_kv_pb_socket: service protocol buffer clients
+%% riak_kv_pb_server: service protocol buffer clients
 %%
 %% Copyright (c) 2007-2010 Basho Technologies, Inc.  All Rights Reserved.
 %%
@@ -36,13 +36,19 @@
 -behaviour(gen_fsm).
 
 %% API
--export([start_link/0, set_socket/2, service_registered/2]).
+-export([start_link/0,
+         set_socket/3,
+         start_tls/1,
+         service_registered/2]).
 
 %% States
--export([wait_for_socket/2, wait_for_socket/3, wait_for_tls/2, wait_for_tls/3,
-         wait_for_auth/2, wait_for_auth/3, connected/2, connected/3]).
+-export([wait_for_socket/2, wait_for_socket/3,
+         wait_for_auth/2, wait_for_auth/3,
+         wait_for_tls_handshake/2, wait_for_tls_handshake/3,
+         connected/2, connected/3]).
 
--export([init/1, handle_event/3, handle_sync_event/4, handle_info/3,
+-export([init/1,
+         handle_event/3, handle_sync_event/4, handle_info/3,
          terminate/3, code_change/4]).
 
 -record(state, {
@@ -71,9 +77,14 @@ start_link() ->
     gen_fsm:start_link(?MODULE, [], []).
 
 %% @doc Sets the socket to service for this server.
--spec set_socket(pid(), port()) -> ok.
-set_socket(Pid, Socket) ->
-    gen_fsm:sync_send_event(Pid, {set_socket, Socket}, infinity).
+-spec set_socket(pid(), port(), pb | tls) -> ok.
+set_socket(Pid, Socket, Type) ->
+    gen_fsm:sync_send_event(Pid, {set_socket, Socket, Type}, infinity).
+
+%% @doc Moves FSM to wait_for_tls_handshake
+-spec start_tls(pid()) -> ok.
+start_tls(Pid) ->
+    gen_fsm:send_event(Pid, start_tls).
 
 %% @doc Notifies the server process of a newly registered PB service.
 -spec service_registered(pid(), module()) -> ok.
@@ -86,7 +97,7 @@ service_registered(Pid, Mod) ->
 init([]) ->
     riak_api_stat:update(pbc_connect),
     ServiceStates = lists:foldl(fun(Service, States) ->
-                                        orddict:store(Service, Service:init(), States)
+                                    orddict:store(Service, Service:init(), States)
                                 end,
                                 orddict:new(),
                                 riak_api_pb_registrar:services()),
@@ -95,80 +106,59 @@ init([]) ->
 wait_for_socket(_Event, State) ->
     {next_state, wait_for_socket, State}.
 
-wait_for_socket({set_socket, Socket}, _From, State=#state{transport={_Transport,Control}}) ->
+wait_for_socket({set_socket, Socket, Type}, _From, State=#state{transport={_Transport,Control}}) ->
     case Control:peername(Socket) of
         {ok, PeerInfo} ->
-            Control:setopts(Socket, [{active, once}]),
-            %% check if security is enabled, if it is wait for TLS, otherwise go
-            %% straight into connected state
-            case riak_core_security:is_enabled() of
-                true ->
-                    {reply, ok, wait_for_tls, State#state{socket=Socket,
-                                                          peername=PeerInfo}};
-                false ->
-                    {reply, ok, connected, State#state{socket=Socket,
-                                                       peername=PeerInfo}}
-            end;
+            ok = Control:setopts(Socket, [{active, once}]),
+            State1 = State#state{socket=Socket, peername=PeerInfo},
+            wait_for_socket_next(Type, State1);
+        {error, enotconn} ->
+            %% See basho/riak_api#54.
+            {stop, normal, ok, State};
+        {error, einval} ->
+            %% See basho/riak_api#54.
+            {stop, normal, ok, State};
         {error, Reason} ->
-            lager:debug("Could not get PB socket peername: ~p", [Reason]),
-            %% It's not really "ok", but there's no reason for the
-            %% listener to crash just because this socket had an
-            %% error. See riak_api#54.
-            {stop, normal, ok, State}
+            lager:error("Could not get PB socket peername: ~p", [Reason]),
+            {stop, {error, {peername_failed, Reason}}, State}
     end;
 wait_for_socket(_Event, _From, State) ->
     {reply, unknown_message, wait_for_socket, State}.
 
-wait_for_tls({msg, MsgCode, _MsgData}, State=#state{socket=Socket,
-                                                    transport={Transport, _Control}}) ->
-    case riak_pb_codec:msg_code(rpbstarttls) of
-        MsgCode ->
-            %% got STARTTLS msg, send ACK back to client
-            Transport:send(Socket, <<1:32/unsigned-big, MsgCode:8>>),
-            %% now do the SSL handshake
-            case ssl:ssl_accept(Socket, riak_api_ssl:options()) of
-                {ok, NewSocket} ->
-                    CommonName = case ssl:peercert(NewSocket) of
-                        {ok, Cert} ->
-                            OTPCert = public_key:pkix_decode_cert(Cert, otp),
-                            riak_core_ssl_util:get_common_name(OTPCert);
-                        {error, _Reason} ->
-                            undefined
-                    end,
-                    lager:debug("STARTTLS succeeded, peer's common name was ~p",
-                               [CommonName]),
-                    {next_state, wait_for_auth,
-                     State#state{socket=NewSocket, common_name=CommonName, transport={ssl,ssl}}};
-                {error, Reason} ->
-                    lager:warning("STARTTLS with client ~s failed: ~p",
-                                  [format_peername(State#state.peername), Reason]),
-                    {stop, {error, {startls_failed, Reason}}, State}
-            end;
-        _ ->
-            lager:debug("Client sent unexpected message code ~p", [MsgCode]),
-            State1 = send_error_and_flush("Security is enabled, please STARTTLS first",
-                                 State),
-            {next_state, wait_for_tls, State1}
-    end;
-wait_for_tls(_Event, State) ->
-    {next_state, wait_for_tls, State}.
-
-wait_for_tls(_Event, _From, State) ->
-    {reply, unknown_message, wait_for_tls, State}.
+wait_for_socket_next(tls, State) ->
+    {reply, ok, wait_for_tls_handshake, State};
+wait_for_socket_next(pb, State) ->
+    case riak_core_security:is_enabled() of
+        true ->
+            {reply, ok, wait_for_auth, State};
+        false ->
+            {reply, ok, connected, State}
+    end.
 
 wait_for_auth({msg, MsgCode, MsgData}, State=#state{socket=Socket,
-                                                    transport={Transport,_Control}}) ->
-    case riak_pb_codec:msg_code(rpbauthreq) of
-        MsgCode ->
+                                                    transport={Transport,Control}}) ->
+    StartTlsCode = riak_pb_codec:msg_code(rpbstarttls),
+    AuthCode = riak_pb_codec:msg_code(rpbauthreq),
+    case {Control, MsgCode} of
+        {inet, StartTlsCode} ->
+            %% got RpbStartTls msg on a non-encrypted socket,
+            %% send ACK back to client and start up TLS
+            Transport:send(Socket, <<1:32/unsigned-big, MsgCode:8>>),
+            %% now wait for the TLS handshake
+            wait_for_tls_handshake(start_tls, State);
+        {ssl, StartTlsCode} ->
+            %% why u send RpbStartTls msg again?
+            Err = "Duplicate RpbStartTls message sent, expected RpbAuthReq",
+            State1 = send_error_and_flush(Err, State),
+            {stop, {error, {auth_failed, Err}}, State1};
+        {_, AuthCode} ->
             %% got AUTH message, try to validate credentials
             AuthReq = riak_pb_codec:decode(MsgCode, MsgData),
             User = AuthReq#rpbauthreq.user,
             Password = AuthReq#rpbauthreq.password,
             {PeerIP, _PeerPort} = State#state.peername,
-            case riak_core_security:authenticate(User, Password, [{ip,
-                                                                   PeerIP},
-                                                                  {common_name,
-                                                                   State#state.common_name}]) of
+            Auth = [{ip, PeerIP}, {common_name, State#state.common_name}],
+            case riak_core_security:authenticate(User, Password, Auth) of
                 {ok, SecurityContext} ->
                     lager:debug("authentication for ~p from ~p succeeded",
                                [User, PeerIP]),
@@ -178,25 +168,26 @@ wait_for_auth({msg, MsgCode, MsgData}, State=#state{socket=Socket,
                      State#state{security=SecurityContext}};
                 {error, Reason} ->
                     %% Allow the client to reauthenticate, I guess?
-
                     %% Add a delay to make brute-force attempts more annoying
                     timer:sleep(5000),
-                    State1 = send_error_and_flush("Authentication failed",
-                                                  State),
-                    lager:debug("authentication for ~p from ~p failed: ~p",
-                               [User, PeerIP, Reason]),
+                    State1 = send_error_and_flush("Authentication failed", State),
+                    Err = io_lib:format("Authentication for ~p from ~p failed: ~p", [User, PeerIP, Reason]),
+                    lager:debug(Err),
                     case State#state.retries of
                         N when N =< 1 ->
                             %% no more chances
-                            {stop, normal, State};
+                            ErrMsg = lists:flatten(Err),
+                            {stop, {error, {auth_failed, ErrMsg}}, State};
                         Retries ->
                             {next_state, wait_for_auth,
                              State1#state{retries=Retries-1}}
                     end
             end;
         _ ->
-            State1 = send_error_and_flush("Security is enabled, please "
-                                          "authenticate first", State),
+            Err = "Security is enabled, "
+                  "please start TLS (optional) "
+                  "and/or authenticate first.",
+            State1 = send_error_and_flush(Err, State),
             {next_state, wait_for_auth, State1}
     end;
 wait_for_auth(_Event, State) ->
@@ -204,6 +195,43 @@ wait_for_auth(_Event, State) ->
 
 wait_for_auth(_Event, _From, State) ->
     {reply, unknown_message, wait_for_auth, State}.
+
+-spec wait_for_tls_handshake(start_tls, #state{}) ->
+    {ok, #state{}} |
+    {next_state, connected, #state{}} |
+    {stop, {error, {tls_handshake_failed, term()}}, #state{}}.
+wait_for_tls_handshake(start_tls, State=#state{socket=Socket}) ->
+    O = riak_api_ssl:options(),
+    T = riak_api_ssl:tls_handshake_timeout(),
+    case ssl:ssl_accept(Socket, O, T) of
+        {ok, NewSocket} ->
+            CommonName = case ssl:peercert(NewSocket) of
+                {ok, Cert} ->
+                    OTPCert = public_key:pkix_decode_cert(Cert, otp),
+                    riak_core_ssl_util:get_common_name(OTPCert);
+                {error, _Reason} ->
+                    undefined
+            end,
+            lager:debug("TLS handshake succeeded, peer's common name was ~p", [CommonName]),
+            ok = ssl:setopts(NewSocket, [{active, once}, {packet, raw}, binary]),
+            NewState = State#state{socket=NewSocket, common_name=CommonName, transport={ssl,ssl}},
+            case riak_core_security:is_enabled() of
+                true ->
+                    {next_state, wait_for_auth, NewState};
+                false ->
+                    {next_state, connected, NewState}
+            end;
+        {error, Reason} ->
+            PeerName = format_peername(State#state.peername),
+            Err = io_lib:format("~p (~s)", [Reason, PeerName]),
+            ErrMsg = lists:flatten(Err),
+            {stop, {error, {tls_handshake_failed, ErrMsg}}, State}
+    end;
+wait_for_tls_handshake(_Event, State) ->
+    {next_state, wait_for_tls_handshake, State}.
+
+wait_for_tls_handshake(_Event, _From, State) ->
+    {reply, unknown_message, wait_for_tls_handshake, State}.
 
 connected(timeout, State=#state{outbuffer=Buffer}) ->
     %% Flush any protocol messages that have been buffering
@@ -241,9 +269,13 @@ connected({msg, MsgCode, MsgData}, State=#state{states=ServiceStates}) ->
                         send_error("Message decoding error: ~p", [Reason], State)
                 end;
             error ->
-                case riak_pb_codec:msg_code(rpbstarttls) of
-                    MsgCode ->
-                        send_error("Security not enabled; STARTTLS not allowed.", State);
+                StartTlsCode = riak_pb_codec:msg_code(rpbstarttls),
+                AuthCode = riak_pb_codec:msg_code(rpbauthreq),
+                case MsgCode of
+                    StartTlsCode ->
+                        send_error("TLS setup message (RpbStartTls) not allowed at this point.", State);
+                    AuthCode ->
+                        send_error("Auth message (RpbAuthReq) not allowed at this point.", State);
                     _ ->
                         send_error("Unknown message code: ~p", [MsgCode], State)
                 end
@@ -331,7 +363,6 @@ handle_info(Message, StateName, State) ->
     lager:error("Unrecognized message ~p", [Message]),
     {next_state, StateName, State, 0}.
 
-
 %% @doc The gen_server terminate/2 callback, called when shutting down
 %% the server.
 -spec terminate(Reason, StateName, State) -> ok when
@@ -371,7 +402,7 @@ decode_buffer(StateName, State=#state{socket=Socket,
             lager:error("Unexpected message format! Message: ~p, Rest: ~p", [Binary, Rest]),
             {stop, badmessage, State};
         {more, _Length} ->
-            Control:setopts(Socket, [{active, once}]),
+            ok = Control:setopts(Socket, [{active, once}]),
             {next_state, StateName, State, 0};
         {error, Reason} ->
             FState = send_error_and_flush({format, "Invalid message packet, reason: ~p", [Reason]},
@@ -564,7 +595,7 @@ receive_closed_socket_test_() ->
 
             %% The call to set_socket should reply ok, but shutdown the
             %% server, not crash and propagate back to the listener process.
-            ?assertEqual(ok, set_socket(Server, ServerSocket)),
+            ?assertEqual(ok, set_socket(Server, ServerSocket, pb)),
             receive
                 {'DOWN', MRef, process, Server, _} -> ok
             after 5000 ->
