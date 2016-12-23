@@ -1,25 +1,3 @@
-%% -------------------------------------------------------------------
-%%
-%% riak_api_sup: supervise the Riak API services
-%%
-%% Copyright (c) 2007-2010 Basho Technologies, Inc.  All Rights Reserved.
-%%
-%% This file is provided to you under the Apache License,
-%% Version 2.0 (the "License"); you may not use this file
-%% except in compliance with the License.  You may obtain
-%% a copy of the License at
-%%
-%%   http://www.apache.org/licenses/LICENSE-2.0
-%%
-%% Unless required by applicable law or agreed to in writing,
-%% software distributed under the License is distributed on an
-%% "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-%% KIND, either express or implied.  See the License for the
-%% specific language governing permissions and limitations
-%% under the License.
-%%
-%% -------------------------------------------------------------------
-
 %% @doc supervise the Riak API services
 
 -module(riak_api_sup).
@@ -31,10 +9,16 @@
 
 -define(CHILD(I, Type), {I, {I, start_link, []}, permanent, 5000, Type, [I]}).
 -define(CHILD(I, Type, Args), {I, {I, start_link, Args}, permanent, 5000, Type, [I]}).
+
 -define(LNAME(IP, Port), lists:flatten(io_lib:format("pb://~p:~p", [IP, Port]))).
+-define(TLSNAME(IP, Port), lists:flatten(io_lib:format("tls://~p:~p", [IP, Port]))).
+
 -define(PB_LISTENER(IP, Port), {?LNAME(IP, Port),
-                                {riak_api_pb_listener, start_link, [IP, Port]},
+                                {riak_api_pb_listener, start_link, [pb, IP, Port]},
                                 permanent, 5000, worker, [riak_api_pb_listener]}).
+-define(TLS_LISTENER(IP, Port), {?TLSNAME(IP, Port),
+                                 {riak_api_pb_listener, start_link, [tls, IP, Port]},
+                                 permanent, 5000, worker, [riak_api_pb_listener]}).
 %% @doc Starts the supervisor.
 -spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
@@ -49,7 +33,9 @@ start_link() ->
 init([]) ->
     Helper = ?CHILD(riak_api_pb_registration_helper, worker),
     Registrar = ?CHILD(riak_api_pb_registrar, worker),
-    PBProcesses = pb_processes(riak_api_pb_listener:get_listeners()),
+    PbListeners = riak_api_pb_listener:get_listeners(pb),
+    TlsListeners = riak_api_pb_listener:get_listeners(tls),
+    PBProcesses = pb_processes(PbListeners, TlsListeners),
     WebProcesses = web_processes(riak_api_web:get_listeners()),
     NetworkProcesses = PBProcesses ++ WebProcesses,
     {ok, {{one_for_one, 10, 10}, [Helper, Registrar|NetworkProcesses]}}.
@@ -60,19 +46,26 @@ web_processes([]) ->
     lager:info("No HTTP/HTTPS listeners were configured, HTTP connections will be disabled."),
     [];
 web_processes(Listeners) ->
-    lists:flatten([ web_listener_spec(Scheme, Binding) ||
-                      {Scheme, Binding} <- Listeners ]).
+    lists:flatten([web_listener_spec(Scheme, Binding) || {Scheme, Binding} <- Listeners]).
 
 web_listener_spec(Scheme, Binding) ->
     riak_api_web:binding_config(Scheme, Binding).
 
 %% Generates child specs from the PB listener configuration.
 %% @private
-pb_processes([]) ->
-    lager:info("No PB listeners were configured, PB connections will be disabled."),
+pb_processes([], []) ->
+    lager:info("No PB or TLS listeners were configured, "
+               "these connections will be disabled."),
     [];
-pb_processes(Listeners) ->
-    [?CHILD(riak_api_pb_sup, supervisor)| pb_listener_specs(Listeners)].
+pb_processes(PbListeners, TlsListeners) ->
+    PbSpecs = pb_listener_specs(PbListeners),
+    TlsSpecs = tls_listener_specs(TlsListeners),
+    [?CHILD(riak_api_pb_sup, supervisor) | PbSpecs ++ TlsSpecs].
 
+%% @private
 pb_listener_specs(Pairs) ->
-    [ ?PB_LISTENER(IP, Port) || {IP, Port} <- Pairs ].
+    [?PB_LISTENER(IP, Port) || {IP, Port} <- Pairs].
+
+%% @private
+tls_listener_specs(Pairs) ->
+    [?TLS_LISTENER(IP, Port) || {IP, Port} <- Pairs].

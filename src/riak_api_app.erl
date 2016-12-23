@@ -48,7 +48,6 @@
       Reason :: term().
 start(_Type, _StartArgs) ->
     riak_core_util:start_app_deps(riak_api),
-
     case riak_api_sup:start_link() of
         {ok, Pid} ->
             riak_core:register(riak_api, [{stat_mod, riak_api_stat}]),
