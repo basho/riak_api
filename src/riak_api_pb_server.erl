@@ -480,7 +480,7 @@ send_message(Bin, #state{outbuffer=Buffer}=State) when is_binary(Bin) orelse is_
 
 
 %% @doc Sends an error message to the client
--spec send_error(iolist() | binary() | format(), #state{}) -> #state{}.
+-spec send_error(iodata() | format(), #state{}) -> #state{}.
 send_error({format, Term}, State) ->
     send_error({format, "~p", [Term]}, State);
 send_error({format, Fmt, TList}, State) ->
