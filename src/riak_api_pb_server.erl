@@ -480,12 +480,14 @@ send_message(Bin, #state{outbuffer=Buffer}=State) when is_binary(Bin) orelse is_
 
 
 %% @doc Sends an error message to the client
--spec send_error(iolist() | format(), #state{}) -> #state{}.
+-spec send_error(iolist() | binary() | format(), #state{}) -> #state{}.
 send_error({format, Term}, State) ->
     send_error({format, "~p", [Term]}, State);
 send_error({format, Fmt, TList}, State) ->
     send_error(io_lib:format(Fmt, TList), State);
-send_error(Message, State) when is_list(Message) orelse is_binary(Message) ->
+send_error(Message, State) when is_list(Message) ->
+    send_error(list_to_binary(Message), State);
+send_error(Message, State) when is_binary(Message) ->
     %% TODO: provide a service for encoding error messages? While
     %% extra work, it would follow the pattern. On the other hand,
     %% maybe it's too much abstraction. This is a hack, allowing us
