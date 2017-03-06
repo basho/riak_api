@@ -11,8 +11,14 @@
 {translation,
  "riak_api.http",
   fun(Conf) ->
+      %% riak_kv cors support uses a key that extends the key used here,
+      %% which is listener.$scheme.$name , so the cors keys should be filtered
+      %% out.
+      NotCorsKey = fun (["listener", Scheme, "cors_allowable_origin"|_T]) -> false;
+                       (_) -> true
+                   end,
       HTTP = cuttlefish_variable:filter_by_prefix("listener.http", Conf),
-      [ IP || {_, IP} <- HTTP]
+      [ IP || {Key, IP} <- HTTP, NotCorsKey(Key) ]
   end
 }.
 
@@ -76,8 +82,11 @@
 {translation,
  "riak_api.https",
  fun(Conf) ->
-     HTTPS = cuttlefish_variable:filter_by_prefix("listener.https", Conf),
-     [ IP || {_, IP} <- HTTPS]
+      NotCorsKey = fun (["listener", Scheme, "cors_allowable_origin"|_T]) -> false;
+                       (_) -> true
+                   end,
+      HTTPS = cuttlefish_variable:filter_by_prefix("listener.https", Conf),
+      [ IP || {Key, IP} <- HTTPS, NotCorsKey(Key) ]
  end
 }.
 
