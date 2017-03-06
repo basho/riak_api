@@ -86,7 +86,7 @@
                        (_) -> true
                    end,
       HTTPS = cuttlefish_variable:filter_by_prefix("listener.https", Conf),
-      [ IP || {Key, IP} <- HTTP, NotCorsKey(Key) ]
+      [ IP || {Key, IP} <- HTTPS, NotCorsKey(Key) ]
  end
 }.
 
