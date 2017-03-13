@@ -47,8 +47,23 @@
       StartArgs :: term(),
       Reason :: term().
 start(_Type, _StartArgs) ->
-    riak_core_util:start_app_deps(riak_api),
+    start(riak_api_ssl:validate_options()).
 
+%% @doc The application:stop callback.
+-spec stop(State::term()) -> ok.
+stop(_State) ->
+    ok = riak_api_pb_service:deregister(?SERVICES),
+    ok.
+
+-spec start(ok | {error, Reason})
+           -> {ok, Pid} | {ok, Pid, State} | {error, Reason} when
+      Pid :: pid(),
+      State :: term(),
+      Reason :: term().
+start({error, Reason}) ->
+    {error, Reason};
+start(ok) ->
+    riak_core_util:start_app_deps(riak_api),
     case riak_api_sup:start_link() of
         {ok, Pid} ->
             riak_core:register(riak_api, [{stat_mod, riak_api_stat}]),
@@ -57,9 +72,3 @@ start(_Type, _StartArgs) ->
         {error, Reason} ->
             {error, Reason}
     end.
-
-%% @doc The application:stop callback.
--spec stop(State::term()) -> ok.
-stop(_State) ->
-    ok = riak_api_pb_service:deregister(?SERVICES),
-    ok.
