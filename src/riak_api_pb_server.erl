@@ -121,7 +121,7 @@ wait_for_socket(_Event, _From, State) ->
 
 wait_for_tls({msg, MsgCode, _MsgData}, State=#state{socket=Socket,
                                                     transport={Transport, _Control}}) ->
-    case riak_pb_codec:msg_code(rpbstarttls) of
+    case riak_pb_codec:msg_code('RpbStartTls') of
         MsgCode ->
             %% got STARTTLS msg, send ACK back to client
             Transport:send(Socket, <<1:32/unsigned-big, MsgCode:8>>),
@@ -158,12 +158,12 @@ wait_for_tls(_Event, _From, State) ->
 
 wait_for_auth({msg, MsgCode, MsgData}, State=#state{socket=Socket,
                                                     transport={Transport,_Control}}) ->
-    case riak_pb_codec:msg_code(rpbauthreq) of
+    case riak_pb_codec:msg_code('RpbAuthReq') of
         MsgCode ->
             %% got AUTH message, try to validate credentials
             AuthReq = riak_pb_codec:decode(MsgCode, MsgData),
-            User = AuthReq#rpbauthreq.user,
-            Password = AuthReq#rpbauthreq.password,
+            User = AuthReq#'RpbAuthReq'.user,
+            Password = AuthReq#'RpbAuthReq'.password,
             {PeerIP, _PeerPort} = State#state.peername,
             case riak_core_security:authenticate(User, Password, [{ip,
                                                                    PeerIP},
@@ -172,7 +172,7 @@ wait_for_auth({msg, MsgCode, MsgData}, State=#state{socket=Socket,
                 {ok, SecurityContext} ->
                     lager:debug("authentication for ~p from ~p succeeded",
                                [User, PeerIP]),
-                    AuthResp = riak_pb_codec:msg_code(rpbauthresp),
+                    AuthResp = riak_pb_codec:msg_code('RpbAuthResp'),
                     Transport:send(Socket, <<1:32/unsigned-big, AuthResp:8>>),
                     {next_state, connected,
                      State#state{security=SecurityContext}};
@@ -241,7 +241,7 @@ connected({msg, MsgCode, MsgData}, State=#state{states=ServiceStates}) ->
                         send_error("Message decoding error: ~p", [Reason], State)
                 end;
             error ->
-                case riak_pb_codec:msg_code(rpbstarttls) of
+                case riak_pb_codec:msg_code('RpbStartTls') of
                     MsgCode ->
                         send_error("Security not enabled; STARTTLS not allowed.", State);
                     _ ->
@@ -490,7 +490,7 @@ send_error(Message, State) when is_list(Message) orelse is_binary(Message) ->
     %% extra work, it would follow the pattern. On the other hand,
     %% maybe it's too much abstraction. This is a hack, allowing us
     %% to avoid including the header file.
-    Packet = riak_pb_codec:encode({rpberrorresp, Message, 0}),
+    Packet = riak_pb_codec:encode({'RpbErrorResp', Message, 0}),
     send_message(Packet, State).
 
 %% @doc Formats the terms with the given string and then sends an

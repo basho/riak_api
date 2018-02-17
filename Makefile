@@ -1,19 +1,22 @@
-.PHONY: deps
+.PHONY: compile rel cover test dialyzer
+REBAR=./rebar3
 
-all: compile
-
-deps:
-	@./rebar get-deps
-
-compile: deps
-	@./rebar compile
+compile:
+	$(REBAR) compile
 
 clean:
-	@./rebar clean
+	$(REBAR) clean
 
-REPO = riak_api
+cover: test
+	$(REBAR) cover
 
-DIALYZER_APPS = kernel stdlib sasl erts ssl tools os_mon runtime_tools crypto inets \
-	xmerl webtool snmp public_key mnesia eunit syntax_tools compiler
+test: compile
+	$(REBAR) as test do eunit
 
-include tools.mk
+dialyzer:
+	$(REBAR) dialyzer
+
+xref:
+	$(REBAR) xref
+
+check: test dialyzer xref

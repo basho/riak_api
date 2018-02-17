@@ -59,13 +59,13 @@ init() ->
 decode(Code, Bin) when Code == 19; Code == 21; Code == 29 ->
     Msg =  riak_pb_codec:decode(Code, Bin),
     case Msg of
-        #rpbgetbucketreq{type =T, bucket =B} ->
+        #'RpbGetBucketReq'{type =T, bucket =B} ->
             Bucket = bucket_type(T, B),
             {ok, Msg, {"riak_core.get_bucket", Bucket}};
-        #rpbsetbucketreq{type=T, bucket=B} ->
+        #'RpbSetBucketReq'{type=T, bucket=B} ->
             Bucket = bucket_type(T, B),
             {ok, Msg, {"riak_core.set_bucket", Bucket}};
-        #rpbresetbucketreq{type=T, bucket=B} ->
+        #'RpbResetBucketReq'{type=T, bucket=B} ->
             %% reset is just a fancy set
             Bucket = bucket_type(T, B),
             {ok, Msg, {"riak_core.set_bucket", Bucket}}
@@ -76,23 +76,23 @@ encode(Message) ->
     {ok, riak_pb_codec:encode(Message)}.
 
 %% Get bucket properties
-process(#rpbgetbucketreq{type=T, bucket=B}, State) ->
+process(#'RpbGetBucketReq'{type=T, bucket=B}, State) ->
     Bucket = maybe_create_bucket_type(T, B),
     case riak_core_bucket:get_bucket(Bucket) of
         {error, no_type} ->
             {error, {format, "No bucket-type named '~s'", [T]}, State};
         Props ->
             PbProps = riak_pb_codec:encode_bucket_props(Props),
-            {reply, #rpbgetbucketresp{props = PbProps}, State}
+            {reply, #'RpbGetBucketResp'{props = PbProps}, State}
     end;
 
 %% Set bucket properties
-process(#rpbsetbucketreq{type=T, bucket=B, props=PbProps}, State) ->
+process(#'RpbSetBucketReq'{type=T, bucket=B, props=PbProps}, State) ->
     Props = riak_pb_codec:decode_bucket_props(PbProps),
     Bucket = maybe_create_bucket_type(T, B),
     case riak_core_bucket:set_bucket(Bucket, Props) of
         ok ->
-            {reply, rpbsetbucketresp, State};
+            {reply, 'RpbSetBucketResp', State};
         {error, no_type} ->
             {error, {format, "No bucket-type named '~s'", [T]}, State};
         {error, Details} ->
@@ -100,10 +100,10 @@ process(#rpbsetbucketreq{type=T, bucket=B, props=PbProps}, State) ->
     end;
 
 %% Reset bucket properties
-process(#rpbresetbucketreq{type = T, bucket=B}, State) ->
+process(#'RpbResetBucketReq'{type = T, bucket=B}, State) ->
     Bucket = maybe_create_bucket_type(T, B),
     riak_core_bucket:reset_bucket(Bucket),
-    {reply, rpbresetbucketresp, State}.
+    {reply, 'RpbResetBucketResp', State}.
 
 process_stream(_, _, State) ->
     {ignore, State}.

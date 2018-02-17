@@ -5,8 +5,8 @@
 %% basic schema test will check to make sure that all defaults from the schema
 %% make it into the generated app.config
 basic_schema_test() ->
-     %% The defaults are defined in ../priv/riak_api.schema. it is the file under test.
-    Config = cuttlefish_unit:generate_templated_config("../priv/riak_api.schema", [], context()),
+     %% The defaults are defined in priv/riak_api.schema. it is the file under test.
+    Config = cuttlefish_unit:generate_templated_config("priv/riak_api.schema", [], context()),
     cuttlefish_unit:assert_config(Config, "riak_api.http", []),
     cuttlefish_unit:assert_config(Config, "riak_api.pb", []),
     cuttlefish_unit:assert_not_configured(Config, "riak_api.https"),
@@ -38,7 +38,7 @@ override_schema_test() ->
         {["tls_protocols", "tlsv1", "2"], off},
         {["check_crl"], off}
     ],
-    Config = cuttlefish_unit:generate_templated_config("../priv/riak_api.schema", Conf, context()),
+    Config = cuttlefish_unit:generate_templated_config("priv/riak_api.schema", Conf, context()),
 
 
     cuttlefish_unit:assert_config(Config, "riak_api.http", [{"127.0.0.3", 8000}, {"127.0.0.2", 8000}]),

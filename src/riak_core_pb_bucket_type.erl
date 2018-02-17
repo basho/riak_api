@@ -49,9 +49,9 @@ init() ->
 decode(Code, Bin) when Code == 31; Code == 32 ->
     Msg = riak_pb_codec:decode(Code, Bin),
     case Msg of
-        #rpbgetbuckettypereq{type=T} ->
+        #'RpbGetBucketTypeReq'{type=T} ->
             {ok, Msg, {"riak_core.get_bucket_type", T}};
-        #rpbsetbuckettypereq{type=T} ->
+        #'RpbSetBucketTypeReq'{type=T} ->
             {ok, Msg, {"riak_core.set_bucket_type", T}}
     end.
 
@@ -60,21 +60,21 @@ encode(Message) ->
     {ok, riak_pb_codec:encode(Message)}.
 
 %% Get bucket type properties
-process(#rpbgetbuckettypereq{type = T}, State) ->
+process(#'RpbGetBucketTypeReq'{type = T}, State) ->
     case riak_core_bucket_type:get(T) of
         undefined ->
             {error, {format, "Invalid bucket type: ~p", [T]}, State};
         Props ->
             PbProps = riak_pb_codec:encode_bucket_props(Props),
-            {reply, #rpbgetbucketresp{props = PbProps}, State}
+            {reply, #'RpbGetBucketResp'{props = PbProps}, State}
     end;
 
 %% Set bucket type properties
-process(#rpbsetbuckettypereq{type = T, props = PbProps}, State) ->
+process(#'RpbSetBucketTypeReq'{type = T, props = PbProps}, State) ->
     Props = riak_pb_codec:decode_bucket_props(PbProps),
     case riak_core_bucket_type:update(T, Props) of
         ok ->
-            {reply, rpbsetbucketresp, State};
+            {reply, 'RpbSetBucketResp', State};
         {error, Details} ->
             {error, {format, "Invalid bucket properties: ~p", [Details]}, State}
     end.

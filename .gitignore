@@ -6,3 +6,5 @@ priv/*
 doc
 ebin
 .local_dialyzer_plt
+.rebar3/
+_build/
