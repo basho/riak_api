@@ -65,11 +65,11 @@ encode(Message) ->
     {ok, riak_pb_codec:encode(Message)}.
 
 %% @doc process/2 callback. Handles an incoming request message.
-process('RpbPingReq', State) ->
-    {reply, 'RpbPingResp', State};
-process('RpbGetServerInfoReq', State) ->
+process(rpbpingreq, State) ->
+    {reply, rpbpingresp, State};
+process(rpbgetserverinforeq, State) ->
     {_, Vsn} = init:script_id(),
-    Message = #'RpbGetServerInfoResp'{node = riak_pb_codec:to_binary(node()),
+    Message = #rpbgetserverinforesp{node = riak_pb_codec:to_binary(node()),
                                     server_version = riak_pb_codec:to_binary(Vsn)},
     {reply, Message, State}.
 
