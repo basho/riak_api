@@ -1,5 +1,5 @@
 -module(riak_api_test_util).
--compile(export_all).
+-compile([export_all, nowarn_export_all]).
 
 wait_for_application_shutdown(App) ->
     case lists:keymember(App, 1, application:which_applications()) of

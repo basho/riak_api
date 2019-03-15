@@ -1,5 +1,5 @@
 -module(pb_service_test).
--compile([export_all]).
+-compile([export_all, nowarn_export_all]).
 -include_lib("eunit/include/eunit.hrl").
 
 %% ===================================================================
@@ -88,9 +88,10 @@ process_stream(_, _, State) ->
 setup() ->
     application:load(lager),
     application:load(riak_api),
+    LogFile = filename:join([code:priv_dir(riak_api), "pb_service_test.log"]),
 
     error_logger:tty(false),
-    application:set_env(lager, handlers, [{lager_file_backend, [{"pb_service_test.log", debug, 10485760, "$D0", 5}]}]),
+    application:set_env(lager, handlers, [{lager_file_backend, [{LogFile, debug, 10485760, "$D0", 5}]}]),
     application:set_env(lager, error_logger_redirect, true),
 
     %% Need riak_core.security capability, let's fake it
