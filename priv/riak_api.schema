@@ -167,6 +167,18 @@
   hidden
 ]}.
 
+{translation,
+    "riak_api.check_crl",
+    fun(Conf) ->
+        CheckCRL = cuttlefish:conf_get("check_crl", Conf),
+        case CheckCRL of
+            on -> true;
+            off -> false
+        end
+    end
+}.
+
+
 %%{translation,
 %% "riak_api.check_crl",
 %% fun(Conf) ->
