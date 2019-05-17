@@ -51,7 +51,7 @@ options() ->
      %% send a certificate
      {verify, verify_peer},
      {server_name_indication, disable},
-     {crl_check, peer},
+     {crl_check, best_effort},
      {reuse_sessions, false} %% required!
     ] ++
     %% conditionally include the honor cipher order, don't pass it if it
