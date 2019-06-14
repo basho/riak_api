@@ -168,19 +168,31 @@
 ]}.
 
 {translation,
- "riak_api.check_crl",
- fun(Conf) ->
-     OTPVer = erlang:system_info(otp_release),
-     CheckCRL = cuttlefish:conf_get("check_crl", Conf),
-     %% CRL checking is broken in mainline OTP as of R16B02, so Riak will ship
-     %% with a patched SSL/public_key to fix it. This means that we don't want
-     %% to pass this option to a vanilla OTP.
-     %% The basho patched OTP can be found at:
-     %% https://github.com/basho/otp/tree/OTP_R16B02_basho3
-     case {CheckCRL, string:str(OTPVer, "basho")} of
-       {_, 0} -> false;
-       {on, _} -> true;
-       {off, _} -> false
-     end
- end
+    "riak_api.check_crl",
+    fun(Conf) ->
+        CheckCRL = cuttlefish:conf_get("check_crl", Conf),
+        case CheckCRL of
+            on -> true;
+            off -> false
+        end
+    end
 }.
+
+
+%%{translation,
+%% "riak_api.check_crl",
+%% fun(Conf) ->
+%%     OTPVer = erlang:system_info(otp_release),
+%%     CheckCRL = cuttlefish:conf_get("check_crl", Conf),
+%%     %% CRL checking is broken in mainline OTP as of R16B02, so Riak will ship
+%%     %% with a patched SSL/public_key to fix it. This means that we don't want
+%%     %% to pass this option to a vanilla OTP.
+%%     %% The basho patched OTP can be found at:
+%%     %% https://github.com/basho/otp/tree/OTP_R16B02_basho3
+%%     case {CheckCRL, string:str(OTPVer, "basho")} of
+%%       {_, 0} -> false;
+%%       {on, _} -> true;
+%%       {off, _} -> false
+%%     end
+%% end
+%%}.
