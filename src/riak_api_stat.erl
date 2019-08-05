@@ -69,7 +69,7 @@ get_app_stats() ->
   riak_stat:get_app_stats(?APP).
 
 get_stats_status() ->
-  riak_stat:get_stats_status(?APP).
+  riak_stat:get_stat([?APP]).
 
 get_stats_info() ->
   riak_stat:get_stats_info(?APP).
