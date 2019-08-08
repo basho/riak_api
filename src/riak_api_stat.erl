@@ -40,7 +40,7 @@
 
 -define(SERVER, ?MODULE).
 -define(APP, riak_api).
--define(PFX, riak_stat:prefix()).
+-define(PFX, riak_core_stat_admin:prefix()).
 
 
 %% -------------------------------------------------------------------
@@ -51,7 +51,7 @@ start_link() ->
 		gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 register_stats() ->
-		riak_stat:register(?APP, stats()).
+		riak_core_stat_admin:register(?APP, stats()).
 
 %% @doc Return current aggregation of all stats.
 -spec get_stats() -> proplists:proplist().
@@ -63,16 +63,16 @@ produce_stats() ->
 		{?APP, get_values()}.
 
 get_values() ->
-  riak_stat:get_app_stats(?APP).
+	riak_core_stat_admin:get_app_stats(?APP).
 
 get_app_stats() ->
-  riak_stat:get_app_stats(?APP).
+	riak_core_stat_admin:get_app_stats(?APP).
 
 get_stats_status() ->
-  riak_stat:get_stat([?APP]).
+	riak_core_stat_admin:get_stat([?APP]).
 
 get_stats_info() ->
-  riak_stat:get_stats_info(?APP).
+	riak_core_stat_admin:get_stats_info(?APP).
 
 update(Arg) ->
   gen_server:cast(?SERVER, {update, Arg}).
@@ -104,7 +104,7 @@ code_change(_OldVsn, State, _Extra) ->
 %% @doc Update the given `Stat'.
 -spec update1(term()) -> ok.
 update1(pbc_connect) ->
-  riak_stat:update([?PFX, ?APP, pbc_connects], 1, spiral).
+	riak_core_stat_admin:update([?PFX, ?APP, pbc_connects], 1, spiral).
 
 %% -------------------------------------------------------------------
 %% Private
