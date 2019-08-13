@@ -27,9 +27,9 @@
       start_link /0, register_stats/0,
       get_stats/0,
       produce_stats/0,
-      get_app_stats/0,
-      get_stats_info/0,
-      get_stats_status/0,
+      get_stat/1,
+      get_info/0,
+			aggregate/2,
       update/1,
       stats/0,
       active_pb_connects/1]).
@@ -58,21 +58,30 @@ register_stats() ->
 get_stats() ->
 		{ok, Stats, _} = riak_core_stat_cache:get_stats(?APP),
 		Stats.
+%%get_stats() ->
+%%	get_stats(?APP).
+%%get_stats(Arg) ->
+%%	riak_core_stat_admin:get_stats(Arg).
 
 produce_stats() ->
-		{?APP, get_values()}.
+		{?APP, get_value(?APP)}.
 
-get_values() ->
-	riak_core_stat_admin:get_app_stats(?APP).
+get_stat(Arg) ->
+	riak_core_stat_admin:get_stat(Arg).
 
-get_app_stats() ->
-	riak_core_stat_admin:get_app_stats(?APP).
+get_value(Arg) ->
+	riak_core_stat_admin:get_value(Arg).
 
-get_stats_status() ->
-	riak_core_stat_admin:get_stat([?APP]).
+get_info() ->
+	riak_core_stat_admin:get_info(?APP).
 
-get_stats_info() ->
-	riak_core_stat_admin:get_stats_info(?APP).
+%% -------------------------------------------------------------------
+
+aggregate(Stats, DPs) ->
+	riak_core_stat_admin:aggregate(Stats, DPs).
+
+%% -------------------------------------------------------------------
+
 
 update(Arg) ->
   gen_server:cast(?SERVER, {update, Arg}).
