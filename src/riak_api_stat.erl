@@ -56,12 +56,9 @@ register_stats() ->
 %% @doc Return current aggregation of all stats.
 -spec get_stats() -> proplists:proplist().
 get_stats() ->
-		{ok, Stats, _} = riak_core_stat_cache:get_stats(?APP),
-		Stats.
-%%get_stats() ->
-%%	get_stats(?APP).
-%%get_stats(Arg) ->
-%%	riak_core_stat_admin:get_stats(Arg).
+    get_stat(?APP).
+%%		{ok, Stats, _} = riak_core_stat_cache:get_stats(?APP),
+%%		Stats.
 
 produce_stats() ->
 		{?APP, get_value(?APP)}.
