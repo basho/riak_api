@@ -57,8 +57,6 @@ register_stats() ->
 -spec get_stats() -> proplists:proplist().
 get_stats() ->
     get_stat(?APP).
-%%		{ok, Stats, _} = riak_core_stat_cache:get_stats(?APP),
-%%		Stats.
 
 produce_stats() ->
 		{?APP, get_value(?APP)}.
