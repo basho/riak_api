@@ -32,6 +32,7 @@
 
 -include_lib("riak_pb/include/riak_pb.hrl").
 -include_lib("public_key/include/public_key.hrl").
+-include("stacktrace.hrl").
 
 -behaviour(gen_fsm_compat).
 
@@ -251,8 +252,8 @@ connected({msg, MsgCode, MsgData}, State=#state{states=ServiceStates}) ->
         {next_state, connected, NewState}
     catch
         %% Tell the client we errored before closing the connection.
-        Type:Failure ->
-            Trace = erlang:get_stacktrace(),
+        ?_exception_(Type, Failure, StackTrace) ->
+            Trace = ?_get_stacktrace_(StackTrace),
             FState = send_error_and_flush({format, "Error processing incoming message: ~p:~p:~p",
                                            [Type, Failure, Trace]}, State),
             {stop, {Type, Failure, Trace}, FState}
@@ -320,8 +321,8 @@ handle_info(StreamMessage, StateName, #state{req={Service,ReqId,StreamState}}=St
         {next_state, StateName, NewState, 0}
     catch
         %% Tell the client we errored before closing the connection.
-        Type:Reason ->
-            Trace = erlang:get_stacktrace(),
+        ?_exception_(Type, Reason, StackToken) ->
+            Trace = ?_get_stacktrace_(StackToken),
             FState = send_error_and_flush({format, "Error processing stream message: ~p:~p:~p",
                                           [Type, Reason, Trace]}, State),
             {stop, {Type, Reason, Trace}, FState}
