@@ -29,7 +29,6 @@
       produce_stats/0,
       get_stat/1,
       get_info/0,
-			aggregate/2,
       update/1,
       stats/0,
       active_pb_connects/1]).
@@ -69,11 +68,6 @@ get_value(Arg) ->
 
 get_info() ->
 	riak_stat:get_info(?APP).
-
-%% -------------------------------------------------------------------
-
-aggregate(Stats, DPs) ->
-	riak_stat:aggregate(Stats, DPs).
 
 %% -------------------------------------------------------------------
 
