@@ -56,7 +56,8 @@
           security,
           retries = 3,
           inbuffer = <<>>, % when an incomplete message comes in, we have to unpack it ourselves
-          outbuffer = riak_api_pb_frame:new() :: riak_api_pb_frame:buffer() % frame buffer which we can use to optimize TCP sends
+          outbuffer = riak_api_pb_frame:new() :: riak_api_pb_frame:buffer(), % frame buffer which we can use to optimize TCP sends
+          node_watcher_update_nodes = [] :: list(atom())
          }).
 
 -type format() :: {format, term()} | {format, io:format(), [term()]}.
@@ -286,8 +287,9 @@ handle_event({registered, Service}, StateName, #state{states=ServiceStates}=Stat
              State#state{states=orddict:store(Service, Service:init(),
                                               ServiceStates)}, 0}
     end;
-handle_event({node_watcher_update, _Nodes}, StateName, State) ->
-    {next_state, StateName, State, 0};
+handle_event({node_watcher_update, Nodes}, StateName, State) ->
+    NewState = State#state{node_watcher_update_nodes = Nodes},
+    {next_state, StateName, NewState};
 handle_event(_Msg, StateName, State) ->
     {next_state, StateName, State, 0}.
 
