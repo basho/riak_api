@@ -289,7 +289,7 @@ handle_event({registered, Service}, StateName, #state{states=ServiceStates}=Stat
     end;
 handle_event({node_watcher_update, Nodes}, StateName, State) ->
     NewState = State#state{node_watcher_update_nodes = Nodes},
-    {next_state, StateName, NewState};
+    {next_state, StateName, NewState, 0};
 handle_event(_Msg, StateName, State) ->
     {next_state, StateName, State, 0}.
 
