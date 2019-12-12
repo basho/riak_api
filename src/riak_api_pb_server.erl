@@ -37,7 +37,7 @@
 -behaviour(gen_fsm_compat).
 
 %% API
--export([start_link/0, set_socket/2, service_registered/2, node_watcher_update/2]).
+-export([start_link/0, set_socket/2, service_registered/2, node_watcher_update/1]).
 
 %% States
 -export([wait_for_socket/2, wait_for_socket/3, wait_for_tls/2, wait_for_tls/3,
@@ -83,10 +83,10 @@ service_registered(Pid, Mod) ->
     gen_fsm_compat:send_all_state_event(Pid, {registered, Mod}).
 
 %% Notifies all client sockets of a node watcher update.
--spec node_watcher_update(Pid :: pid(), Nodes :: list(atom())) ->
+-spec node_watcher_update(Pid :: pid()) ->
     ok.
-node_watcher_update(Pid, Nodes) ->
-    gen_fsm_compat:send_all_state_event(Pid, {node_watcher_update, Nodes}).
+node_watcher_update(Pid) ->
+    gen_fsm_compat:send_all_state_event(Pid, node_watcher_update).
 
 %% @doc The gen_server init/1 callback, initializes the
 %% riak_api_pb_server.
@@ -287,9 +287,21 @@ handle_event({registered, Service}, StateName, #state{states=ServiceStates}=Stat
              State#state{states=orddict:store(Service, Service:init(),
                                               ServiceStates)}, 0}
     end;
-handle_event({node_watcher_update, Nodes}, StateName, State) ->
-    NewState = State#state{node_watcher_update_nodes = Nodes},
-    {next_state, StateName, NewState, 0};
+handle_event(node_watcher_update, StateName, State) ->
+    try
+        Service = riak_kv_pb_information,
+        Message = rpbnodewatcherupdate,
+        ServiceState = Service:init(),
+        NewState = process_message(Service, Message, ServiceState, State),
+        {next_state, StateName, NewState}
+    catch
+        %% Tell the client we errored before closing the connection.
+        ?_exception_(Type, Failure, StackTrace) ->
+            Trace = ?_get_stacktrace_(StackTrace),
+            FState = send_error_and_flush({format, "Error processing incoming message: ~p:~p:~p",
+                [Type, Failure, Trace]}, State),
+            {stop, {Type, Failure, Trace}, FState}
+    end;
 handle_event(_Msg, StateName, State) ->
     {next_state, StateName, State, 0}.
 
