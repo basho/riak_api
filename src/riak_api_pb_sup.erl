@@ -54,7 +54,8 @@ node_watcher_update() ->
         undefined ->
             ok;
         _ ->
-            _ = [riak_api_pb_server:node_watcher_update(Pid) ||
+            Timestamp = erlang:monotonic_time(),
+            _ = [riak_api_pb_server:node_watcher_update(Pid, Timestamp) ||
                 {_, Pid, _, _} <- supervisor:which_children(?MODULE)],
             ok
     end.

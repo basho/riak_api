@@ -37,7 +37,7 @@
 -behaviour(gen_fsm_compat).
 
 %% API
--export([start_link/0, set_socket/2, service_registered/2, node_watcher_update/1]).
+-export([start_link/0, set_socket/2, service_registered/2, node_watcher_update/2]).
 
 %% States
 -export([wait_for_socket/2, wait_for_socket/3, wait_for_tls/2, wait_for_tls/3,
@@ -83,10 +83,10 @@ service_registered(Pid, Mod) ->
     gen_fsm_compat:send_all_state_event(Pid, {registered, Mod}).
 
 %% Notifies all client sockets of a node watcher update.
--spec node_watcher_update(Pid :: pid()) ->
+-spec node_watcher_update(Pid :: pid(), Timestamp :: integer()) ->
     ok.
-node_watcher_update(Pid) ->
-    gen_fsm_compat:send_all_state_event(Pid, node_watcher_update).
+node_watcher_update(Pid, Timestamp) ->
+    gen_fsm_compat:send_all_state_event(Pid, {node_watcher_update, Timestamp}).
 
 %% @doc The gen_server init/1 callback, initializes the
 %% riak_api_pb_server.
@@ -287,12 +287,10 @@ handle_event({registered, Service}, StateName, #state{states=ServiceStates}=Stat
              State#state{states=orddict:store(Service, Service:init(),
                                               ServiceStates)}, 0}
     end;
-handle_event(node_watcher_update, StateName, State) ->
+handle_event({node_watcher_update, Timestamp}, StateName, State) ->
     try
-        Service = riak_kv_pb_information,
-        Message = rpbnodewatcherupdate,
-        ServiceState = Service:init(),
-        State1 = process_message(Service, Message, ServiceState, State),
+        ServiceState = riak_kv_pb_information:init(Timestamp),
+        State1 = process_message(riak_kv_pb_information, rpbnodewatcherupdate, ServiceState, State),
         {ok, Data, NewBuffer} = riak_api_pb_frame:flush(State1#state.outbuffer),
         State2 = State1#state{outbuffer = NewBuffer},
         flush(Data, State2),
