@@ -292,8 +292,11 @@ handle_event(node_watcher_update, StateName, State) ->
         Service = riak_kv_pb_information,
         Message = rpbnodewatcherupdate,
         ServiceState = Service:init(),
-        NewState = process_message(Service, Message, ServiceState, State),
-        {next_state, StateName, NewState}
+        State1 = process_message(Service, Message, ServiceState, State),
+        {ok, Data, NewBuffer} = riak_api_pb_frame:flush(State1#state.outbuffer),
+        State2 = State1#state{outbuffer = NewBuffer},
+        flush(Data, NewBuffer),
+        {next_state, StateName, State2}
     catch
         %% Tell the client we errored before closing the connection.
         ?_exception_(Type, Failure, StackTrace) ->
