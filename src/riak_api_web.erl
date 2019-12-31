@@ -54,20 +54,31 @@ binding_config(Scheme, Binding) ->
      permanent, 5000, worker, [mochiweb_socket_server]}.
 
 spec_from_binding(http, Name, {Ip, Port}) ->
-    lists:flatten([{name, Name},
-                   {ip, Ip},
-                   {port, Port},
-                   {nodelay, true}],
-                  common_config());
-
+    Options = 
+        lists:flatten([{name, Name},
+                    {ip, Ip},
+                    {port, Port},
+                    {nodelay, true}],
+                    common_config()),
+    add_recbuf(Options);
 spec_from_binding(https, Name, {Ip, Port}) ->
-    lists:flatten([{name, Name},
-                   {ip, Ip},
-                   {port, Port},
-                   {ssl, true},
-                   {ssl_opts, riak_api_ssl:options()},
-                   {nodelay, true}],
-                  common_config()).
+    Options = 
+        lists:flatten([{name, Name},
+                    {ip, Ip},
+                    {port, Port},
+                    {ssl, true},
+                    {ssl_opts, riak_api_ssl:options()},
+                    {nodelay, true}],
+                    common_config()),
+    add_recbuf(Options).
+
+add_recbuf(Options) ->
+    case application:get_env(webmachine, recbuf) of
+        {ok, RecBuf} ->
+            [{recbuf, RecBuf}|Options];
+        _ ->
+            Options
+    end.
 
 spec_name(Scheme, Ip, Port) ->
     FormattedIP = if is_tuple(Ip); tuple_size(Ip) == 4 ->
