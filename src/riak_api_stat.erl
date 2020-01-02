@@ -19,6 +19,7 @@
 %%
 %% @doc Collector for various api stats.
 -module(riak_api_stat).
+-include_lib("riak_core/include/riak_stat.hrl").
 
 -behaviour(gen_server).
 
@@ -102,7 +103,7 @@ code_change(_OldVsn, State, _Extra) ->
 %% @doc Update the given `Stat'.
 -spec update1(term()) -> ok.
 update1(pbc_connect) ->
-	riak_stat:update([Prefix, ?APP, pbc_connects], 1, spiral).
+	riak_stat:update([?Prefix, ?APP, pbc_connects], 1, spiral).
 
 %% -------------------------------------------------------------------
 %% Private
