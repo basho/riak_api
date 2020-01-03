@@ -39,7 +39,7 @@
 
 -define(SERVER, ?MODULE).
 -define(APP, riak_api).
--define(PFX, riak).
+-define(Prefix, riak).
 
 
 %% -------------------------------------------------------------------
