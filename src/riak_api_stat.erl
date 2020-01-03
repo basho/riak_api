@@ -19,7 +19,6 @@
 %%
 %% @doc Collector for various api stats.
 -module(riak_api_stat).
--include_lib("riak_core/include/riak_stat.hrl").
 
 -behaviour(gen_server).
 
@@ -40,7 +39,7 @@
 
 -define(SERVER, ?MODULE).
 -define(APP, riak_api).
--define(PFX, riak_stat:prefix()).
+-define(PFX, riak).
 
 
 %% -------------------------------------------------------------------
