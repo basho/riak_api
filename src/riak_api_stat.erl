@@ -73,7 +73,8 @@ get_info() ->
 
 
 update(Arg) ->
-  gen_server:cast(?SERVER, {update, Arg}).
+    Statname = lists:flatten([?Prefix,?APP | Arg]),
+    update1(Statname).
 
 %% gen_server
 
@@ -84,9 +85,6 @@ init([]) ->
 handle_call(_Req, _From, State) ->
 		{reply, ok, State}.
 
-handle_cast({update, Arg}, State) ->
-		update1(Arg),
-		{noreply, State};
 handle_cast(_Req, State) ->
 		{noreply, State}.
 
@@ -99,19 +97,20 @@ terminate(_Reason, _State) ->
 code_change(_OldVsn, State, _Extra) ->
 		{ok, State}.
 
-%% @doc Update the given `Stat'.
+%% @doc Update the given `Stat'. Only one stat is updated and it is a
+%%      spiral @end
 -spec update1(term()) -> ok.
-update1(pbc_connect) ->
-	riak_stat:update([?Prefix, ?APP, pbc_connects], 1, spiral).
+update1(StatName) ->
+	riak_stat:update(StatName, 1, spiral).
 
 %% -------------------------------------------------------------------
 %% Private
 %% -------------------------------------------------------------------
 stats() ->
 		[
-		 {pbc_connects, spiral, [], [{one, pbc_connects},
+		 {[pbc, connects], spiral, [], [{one, pbc_connects},
 																 {count, pbc_connects_total}]},
-		 {[pbc_connects, active], {function, ?MODULE, active_pb_connects}, [], [{value, pbc_active}]}
+		 {[pbc, connects, active], {function, ?MODULE, active_pb_connects}, [], [{value, pbc_active}]}
 		].
 
 active_pb_connects(_) ->
