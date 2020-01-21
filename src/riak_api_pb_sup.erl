@@ -25,7 +25,7 @@
 -module(riak_api_pb_sup).
 -behaviour(supervisor).
 -export([start_link/0, init/1, stop/1]).
--export([start_socket/0, service_registered/1, node_watcher_update/0]).
+-export([start_socket/0, service_registered/1, node_watcher_update/1]).
 
 %% @doc Starts a PB socket server.
 -spec start_socket() -> {ok, pid()} | {error, term()}.
@@ -47,16 +47,16 @@ service_registered(Mod) ->
 
 %% Notifies connected client sockets of any node_watcher updates, to
 %% be used for the intelligent client.
--spec node_watcher_update() ->
+-spec node_watcher_update(ConnectionPids :: list(pid())) ->
     ok.
-node_watcher_update() ->
+node_watcher_update(ConnectionPids) when erlang:is_list(ConnectionPids) ->
     case erlang:whereis(?MODULE) of
         undefined ->
             ok;
         _ ->
-            Timestamp = erlang:monotonic_time(),
-            _ = [riak_api_pb_server:node_watcher_update(Pid, Timestamp) ||
-                {_, Pid, _, _} <- supervisor:which_children(?MODULE)],
+            lists:foreach(fun(Pid) ->
+                riak_api_pb_server:node_watcher_update(Pid)
+            end, ConnectionPids),
             ok
     end.
 
