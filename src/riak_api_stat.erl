@@ -50,7 +50,7 @@ start_link() ->
 		gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 register_stats() ->
-		riak_stat:register(?APP, stats()).
+    riak_core_stats_mgr:register(?APP, stats()).
 
 %% @doc Return current aggregation of all stats.
 -spec get_stats() -> proplists:proplist().
@@ -61,13 +61,13 @@ produce_stats() ->
 		{?APP, get_value(?APP)}.
 
 get_stat(Arg) ->
-	riak_stat:get_stats(Arg).
+    riak_core_stats_mgr:get_stats(Arg).
 
 get_value(Arg) ->
-	riak_stat:get_value(Arg).
+    riak_core_stats_mgr:get_value(Arg).
 
 get_info() ->
-	riak_stat:get_info(?APP).
+    riak_core_stats_mgr:get_info(?APP).
 
 %% -------------------------------------------------------------------
 
@@ -101,7 +101,7 @@ code_change(_OldVsn, State, _Extra) ->
 %%      spiral @end
 -spec update1(term()) -> ok.
 update1(StatName) ->
-	riak_stat:update(StatName, 1, spiral).
+    riak_core_stats_mgr:update(StatName, 1, spiral).
 
 %% -------------------------------------------------------------------
 %% Private
