@@ -8,6 +8,7 @@
                   kernel,
                   stdlib,
                   lager,
+                  stats,
                   riak_core,
                   gen_fsm_compat
                  ]},
