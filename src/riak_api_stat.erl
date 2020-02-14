@@ -39,8 +39,7 @@
 
 -define(SERVER, ?MODULE).
 -define(APP, riak_api).
--define(Prefix, riak).
-
+-define(PREFIX, riak).
 
 %% -------------------------------------------------------------------
 %% API
@@ -50,7 +49,7 @@ start_link() ->
 		gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
 register_stats() ->
-    riak_core_stats_mgr:register(?APP, stats()).
+    lists:foreach(fun(Stat) -> stats:register([?PREFIX,?APP|Stat]) end,stats()).
 
 %% @doc Return current aggregation of all stats.
 -spec get_stats() -> proplists:proplist().
@@ -61,19 +60,19 @@ produce_stats() ->
 		{?APP, get_value(?APP)}.
 
 get_stat(Arg) ->
-    riak_core_stats_mgr:get_stats(Arg).
+    stats:get_stats(Arg).
 
 get_value(Arg) ->
-    riak_core_stats_mgr:get_value(Arg).
+    stats:get_value(Arg).
 
 get_info() ->
-    riak_core_stats_mgr:get_info(?APP).
+    stats:get_info(?APP).
 
 %% -------------------------------------------------------------------
 
 
 update(Arg) ->
-    Statname = lists:flatten([?Prefix,?APP | Arg]),
+    Statname = lists:flatten([?PREFIX,?APP | Arg]),
     update1(Statname).
 
 %% gen_server
@@ -101,7 +100,7 @@ code_change(_OldVsn, State, _Extra) ->
 %%      spiral @end
 -spec update1(term()) -> ok.
 update1(StatName) ->
-    riak_core_stats_mgr:update(StatName, 1, spiral).
+    stats:update(StatName, 1, spiral).
 
 %% -------------------------------------------------------------------
 %% Private
