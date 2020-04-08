@@ -1,5 +1,8 @@
 language: erlang
-script:
-  - make test
 otp_release:
-  - R16B03
+  - 20.3.8
+  - 21.3
+  - 22.1
+script:
+  - chmod u+x rebar3
+  - ./rebar3 do upgrade, compile, dialyzer, eunit
