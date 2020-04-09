@@ -34,7 +34,13 @@
 -include_lib("public_key/include/public_key.hrl").
 -include("stacktrace.hrl").
 
--behaviour(gen_fsm_compat).
+-compile({nowarn_deprecated_function, 
+            [{gen_fsm, start_link, 3},
+                {gen_fsm, start, 3},
+                {gen_fsm, sync_send_event, 3},
+                {gen_fsm, send_all_state_event, 2}]}).
+
+-behaviour(gen_fsm).
 
 %% API
 -export([start_link/0, set_socket/2, service_registered/2]).
@@ -62,6 +68,14 @@
 -type format() :: {format, term()} | {format, io:format(), [term()]}.
 -export_type([format/0]).
 
+-ifdef(deprecated_21).
+ssl_handshake(Socket, SslOpts) ->
+    ssl:handshake(Socket, SslOpts).
+-else.
+ssl_handshake(Socket, SslOpts) ->
+    ssl:ssl_accept(Socket, SslOpts).
+-endif.
+
 %% ===================================================================
 %% Public API
 %% ===================================================================
@@ -69,17 +83,17 @@
 %% @doc Starts a PB server, ready to service a single socket.
 -spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
-    gen_fsm_compat:start_link(?MODULE, [], []).
+    gen_fsm:start_link(?MODULE, [], []).
 
 %% @doc Sets the socket to service for this server.
 -spec set_socket(pid(), port()) -> ok.
 set_socket(Pid, Socket) ->
-    gen_fsm_compat:sync_send_event(Pid, {set_socket, Socket}, infinity).
+    gen_fsm:sync_send_event(Pid, {set_socket, Socket}, infinity).
 
 %% @doc Notifies the server process of a newly registered PB service.
 -spec service_registered(pid(), module()) -> ok.
 service_registered(Pid, Mod) ->
-    gen_fsm_compat:send_all_state_event(Pid, {registered, Mod}).
+    gen_fsm:send_all_state_event(Pid, {registered, Mod}).
 
 %% @doc The gen_server init/1 callback, initializes the
 %% riak_api_pb_server.
@@ -127,7 +141,7 @@ wait_for_tls({msg, MsgCode, _MsgData}, State=#state{socket=Socket,
             %% got STARTTLS msg, send ACK back to client
             Transport:send(Socket, <<1:32/unsigned-big, MsgCode:8>>),
             %% now do the SSL handshake
-            case ssl:ssl_accept(Socket, riak_api_ssl:options()) of
+            case ssl_handshake(Socket, riak_api_ssl:options()) of
                 {ok, NewSocket} ->
                     CommonName = case ssl:peercert(NewSocket) of
                         {ok, Cert} ->
@@ -555,7 +569,7 @@ receive_closed_socket_test_() ->
             %% Accept the socket, start a server, give it over to the server,
             %% then have the client close the socket.
             {ok, ServerSocket} = gen_tcp:accept(Listen),
-            {ok, Server} = gen_fsm_compat:start(?MODULE, [], []),
+            {ok, Server} = gen_fsm:start(?MODULE, [], []),
             MRef = monitor(process, Server),
             ok = gen_tcp:controlling_process(ServerSocket, Server),
             ok = gen_tcp:close(ClientSocket),
