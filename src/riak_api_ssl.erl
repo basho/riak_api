@@ -62,7 +62,7 @@ options() ->
     [{verify_fun, {fun validate_function/3, {CACerts, []}}} || CheckCRL ].
 
 
--if(deprecated_22).
+-ifdef(deprecated_22).
 ciphers() -> [].
     % ciphers not support as an option when starting a SSL handshake in OTP 22
 -else.
