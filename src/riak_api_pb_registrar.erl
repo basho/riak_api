@@ -336,6 +336,7 @@ registration_inheritance_test_() ->
                  Registrar = whereis(?MODULE),
                  exit(Registrar, brutal_kill),
                  erlang:yield(),
+                 timer:sleep(1),
                  ?assertEqual(Helper, proplists:get_value(owner, ets:info(?ETS_NAME))),
                  NewReg = test_start(?MODULE),
                  erlang:yield(),
