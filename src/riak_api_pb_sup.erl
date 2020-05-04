@@ -54,8 +54,8 @@ node_watcher_update(ConnectionPids) when erlang:is_list(ConnectionPids) ->
         undefined ->
             ok;
         _ ->
-            lists:foreach(fun(Pid) ->
-                riak_api_pb_server:node_watcher_update(Pid)
+            lists:foreach(fun({Pid, UpdateFun}) ->
+                riak_api_pb_server:node_watcher_update(Pid, UpdateFun)
             end, ConnectionPids),
             ok
     end.
