@@ -38,13 +38,12 @@ options() ->
     HonorCipherOrder = app_helper:get_env(riak_api, honor_cipher_order, false),
     CheckCRL = app_helper:get_env(riak_api, check_crl, false),
 
-    {Ciphers, _} = riak_core_ssl_util:parse_ciphers(riak_core_security:get_ciphers()),
     CACerts = riak_core_ssl_util:load_certs(CACertFile),
 
+    ciphers() ++
     [{certfile, CertFile},
      {keyfile, KeyFile},
      {cacerts, CACerts},
-     {ciphers, Ciphers},
      {versions, Versions},
      %% force peer validation, even though
      %% we don't care if the peer doesn't
@@ -62,6 +61,16 @@ options() ->
     %% verify_fun for them.
     [{verify_fun, {fun validate_function/3, {CACerts, []}}} || CheckCRL ].
 
+
+-ifdef(deprecated_22).
+ciphers() -> [].
+    % ciphers not support as an option when starting a SSL handshake in OTP 22
+-else.
+ciphers() ->
+    {Ciphers, _} =
+        riak_core_ssl_util:parse_ciphers(riak_core_security:get_ciphers()),
+    [{ciphers, Ciphers}].
+-endif.
 
 
 %% @doc Validator function for SSL negotiation.

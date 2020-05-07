@@ -9,3 +9,4 @@ ebin
 .rebar3/
 _build/
 rebar.lock
+log/*

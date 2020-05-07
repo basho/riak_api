@@ -8,8 +8,7 @@
                   kernel,
                   stdlib,
                   lager,
-                  riak_core,
-                  gen_fsm_compat
+                  riak_core
                  ]},
   {registered, [riak_api_sup,
                 riak_api_pb_sup]},
