@@ -1,5 +1,5 @@
 name: Erlang CI
-  
+
 on:
   push:
     branches: [ develop-3.0 ]
@@ -7,14 +7,14 @@ on:
     branches: [ develop-3.0 ]
 
 jobs:
-
   build:
-
     runs-on: ubuntu-latest
-
+    strategy:
+      matrix:
+        otp: [20.3, 21.3, 22.3]
+      fail-fast: false
     container:
-      image: erlang:22.3.3
-
+      image: erlang:${{ matrix.otp }}
     steps:
     - uses: actions/checkout@v2
     - name: Compile
