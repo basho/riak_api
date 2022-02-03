@@ -29,6 +29,9 @@
          terminate/2, code_change/3]).
 -export([sock_opts/0, new_connection/2]).
 -export([get_listeners/0]).
+
+-include_lib("kernel/include/logger.hrl").
+
 -record(state, {portnum}).
 
 %% @doc Starts the PB listener
@@ -104,7 +107,7 @@ get_port() ->
         undefined ->
             undefined;
         Port ->
-            lager:warning("The config riak_api/pb_port has been"
+            ?LOG_WARNING("The config riak_api/pb_port has been"
                           " deprecated and will be removed. Use"
                           " riak_api/pb (IP/Port pairs) in the future."),
             Port
@@ -116,7 +119,7 @@ get_ip() ->
         undefined ->
             undefined;
         IP ->
-            lager:warning("The config riak_api/pb_ip has been"
+            ?LOG_WARNING("The config riak_api/pb_ip has been"
                           " deprecated and will be removed. Use"
                           " riak_api/pb (IP/Port pairs) in the future."),
             IP

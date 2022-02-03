@@ -28,6 +28,8 @@
 -export([get_listeners/0,
          binding_config/2]).
 
+-include_lib("kernel/include/logger.hrl").
+
 get_listeners() ->
     get_listeners(http) ++ get_listeners(https).
 
@@ -37,7 +39,7 @@ get_listeners(Scheme) ->
                     {riak_api, Scheme, List} when is_list(List) ->
                         List;
                     {riak_core, Scheme, List} when is_list(List) ->
-                        lager:warning("Setting riak_core/~s is deprecated, please use riak_api/~s", [Scheme, Scheme]),
+                        ?LOG_WARNING("Setting riak_core/~s is deprecated, please use riak_api/~s", [Scheme, Scheme]),
                         List;
                     _ ->
                         []

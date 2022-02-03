@@ -27,6 +27,8 @@
 -export([options/0]).
 -include_lib("public_key/include/public_key.hrl").
 
+-include_lib("kernel/include/logger.hrl").
+
 %% @doc Returns a list of common options for SSL/TLS connections.
 -spec options() -> [ssl:ssl_option()].
 options() ->
@@ -76,12 +78,12 @@ ciphers() ->
 %% @doc Validator function for SSL negotiation.
 %%
 validate_function(Cert, valid_peer, State) ->
-    lager:debug("validing peer ~p with ~p intermediate certs",
+    ?LOG_DEBUG("validing peer ~p with ~p intermediate certs",
                 [riak_core_ssl_util:get_common_name(Cert),
                  length(element(2, State))]),
     %% peer certificate validated, now check the CRL
     Res = (catch check_crl(Cert, State)),
-    lager:debug("CRL validate result for ~p: ~p",
+    ?LOG_DEBUG("CRL validate result for ~p: ~p",
                 [riak_core_ssl_util:get_common_name(Cert), Res]),
     {Res, State};
 validate_function(Cert, valid, {TrustedCAs, IntermediateCerts}=State) ->
@@ -93,7 +95,7 @@ validate_function(Cert, valid, {TrustedCAs, IntermediateCerts}=State) ->
             %% check is valid CA certificate, add to the list of
             %% intermediates
             Res = (catch check_crl(Cert, State)),
-            lager:debug("CRL intermediate CA validate result for ~p: ~p",
+            ?LOG_DEBUG("CRL intermediate CA validate result for ~p: ~p",
                         [riak_core_ssl_util:get_common_name(Cert), Res]),
             {Res, {TrustedCAs, [Cert|IntermediateCerts]}}
     end;
@@ -111,7 +113,7 @@ check_crl(Cert, State) ->
     case pubkey_cert:select_extension(?'id-ce-cRLDistributionPoints',
                                       pubkey_cert:extensions_list(Cert#'OTPCertificate'.tbsCertificate#'OTPTBSCertificate'.extensions)) of
         undefined ->
-            lager:debug("no CRL distribution points for ~p",
+            ?LOG_DEBUG("no CRL distribution points for ~p",
                          [riak_core_ssl_util:get_common_name(Cert)]),
             %% fail; we can't validate if there's no CRL
             no_crl;
@@ -149,7 +151,7 @@ issuer_function(_DP, CRL, _Issuer, {TrustedCAs, IntermediateCerts}) ->
     %% assume certificates are ordered from root to tip
     case find_issuer(Issuer, IntermediateCerts ++ Certs) of
         undefined ->
-            lager:debug("unable to find certificate matching CRL issuer ~p",
+            ?LOG_DEBUG("unable to find certificate matching CRL issuer ~p",
                         [Issuer]),
             error;
         IssuerCert ->
@@ -209,10 +211,10 @@ build_chain({DER, Cert}, IntCerts, TrustedCerts, Acc) ->
             case Match of
                 undefined when IntCerts /= TrustedCerts ->
                     %% continue the chain by using the trusted CAs
-                    lager:debug("Ran out of intermediate certs, switching to trusted certs~n"),
+                    ?LOG_DEBUG("Ran out of intermediate certs, switching to trusted certs~n"),
                     build_chain({DER, Cert}, TrustedCerts, TrustedCerts, Acc);
                 undefined ->
-                    lager:debug("Can't construct chain of trust beyond ~p",
+                    ?LOG_DEBUG("Can't construct chain of trust beyond ~p",
                                 [riak_core_ssl_util:get_common_name(Cert)]),
                     %% can't find the current cert's issuer
                     undefined;
@@ -259,10 +261,10 @@ fetch_point(#'DistributionPoint'{distributionPoint={fullName, Names}}) ->
 fetch([]) ->
     not_available;
 fetch([{uniformResourceIdentifier, "file://"++_File}|Rest]) ->
-    lager:debug("fetching CRLs from file URIs is not supported"),
+    ?LOG_DEBUG("fetching CRLs from file URIs is not supported"),
     fetch(Rest);
 fetch([{uniformResourceIdentifier, "http"++_=URL}|Rest]) ->
-    lager:debug("getting CRL from ~p~n", [URL]),
+    ?LOG_DEBUG("getting CRL from ~p~n", [URL]),
     _ = inets:start(),
     case httpc:request(get, {URL, []}, [], [{body_format, binary}]) of
         {ok, {_Status, _Headers, Body}} ->
@@ -278,11 +280,11 @@ fetch([{uniformResourceIdentifier, "http"++_=URL}|Rest]) ->
                     {Body, CertList}
             end;
         {error, _Reason} ->
-            lager:debug("failed to get CRL ~p~n", [_Reason]),
+            ?LOG_DEBUG("failed to get CRL ~p~n", [_Reason]),
             fetch(Rest)
     end;
 fetch([Loc|Rest]) ->
     %% unsupported CRL location
-    lager:debug("unable to fetch CRL from unsupported location ~p",
+    ?LOG_DEBUG("unable to fetch CRL from unsupported location ~p",
                 [Loc]),
     fetch(Rest).

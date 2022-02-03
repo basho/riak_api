@@ -1,5 +1,7 @@
 -module(pb_service_test).
 -compile([export_all, nowarn_export_all]).
+
+-include_lib("kernel/include/logger.hrl").
 -include_lib("eunit/include/eunit.hrl").
 
 %% ===================================================================
@@ -101,7 +103,6 @@ setup() ->
     OldListeners = app_helper:get_env(riak_api, pb, [{"127.0.0.1", 8087}]),
     application:set_env(riak_api, pb, [{"127.0.0.1", 32767}]),
 
-    lager:start(),
     {ok, Sup} = riak_api_sup:start_link(),
     unlink(Sup),
     wait_for_port(),
@@ -114,7 +115,6 @@ cleanup({L, Sup}) ->
     ets:delete(riak_capability_ets),
     exit(Sup, normal),
     application:set_env(riak_api, pb, L),
-    application:stop(lager),
     ok.
 
 request_multi(Payloads) when is_list(Payloads) ->
@@ -248,7 +248,7 @@ wait_for_port() ->
     wait_for_port(10000).
 
 wait_for_port(Timeout) when is_integer(Timeout) ->
-    lager:debug("Waiting for PB Port within timeout ~p", [Timeout]),
+    ?LOG_DEBUG("Waiting for PB Port within timeout ~p", [Timeout]),
     TRef = erlang:send_after(Timeout, self(), timeout),
     wait_for_port(TRef);
 wait_for_port(TRef) ->
@@ -264,13 +264,13 @@ wait_for_port(TRef) ->
                  end),
     receive
         timeout ->
-            lager:error("PB port did not come up within timeout"),
+            ?LOG_ERROR("PB port did not come up within timeout"),
             {error, timeout};
         {error, Reason} ->
-            lager:debug("Waiting for PB port failed: ~p", [Reason]),
+            ?LOG_DEBUG("Waiting for PB port failed: ~p", [Reason]),
             wait_for_port(TRef);
         connected ->
             erlang:cancel_timer(TRef),
-            lager:debug("PB port is up"),
+            ?LOG_DEBUG("PB port is up"),
             ok
     end.
