@@ -30,7 +30,7 @@
 -include_lib("kernel/include/logger.hrl").
 
 %% @doc Returns a list of common options for SSL/TLS connections.
--spec options() -> [ssl:ssl_option()].
+-spec options() -> [ssl:tls_option()].
 options() ->
     CoreSSL = app_helper:get_env(riak_core, ssl),
     CACertFile = proplists:get_value(cacertfile, CoreSSL),
